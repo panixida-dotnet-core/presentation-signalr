@@ -23,12 +23,12 @@ public sealed class AccessTokenTests
     [InlineData("/hubs/events", "?access_token=%20", "")]
     [InlineData("/hubs/events", "?access_token=a&access_token=b", "")]
     [InlineData("/hubs/events", "?access_token=a%0D%0Ab", "")]
-    public async Task UseSignalRAccessTokens_ShouldRestrictForwarding(string? path, string query, string expected)
+    public async Task UseSignalR_ShouldRestrictForwarding(string? path, string query, string expected)
     {
         // Arrange
         using var services = new ServiceCollection().BuildServiceProvider();
         var app = new ApplicationBuilder(services);
-        app.UseSignalRAccessTokens("/hubs/events", "/hubs/other").ShouldBeSameAs(app);
+        app.UseSignalR("/hubs/events", "/hubs/other").ShouldBeSameAs(app);
         var nextCalled = false;
         app.Run(_ => { nextCalled = true; return Task.CompletedTask; });
         var context = new DefaultHttpContext();
@@ -47,11 +47,11 @@ public sealed class AccessTokenTests
     [InlineData("Bearer original")]
     [InlineData("Basic original")]
     [InlineData("")]
-    public async Task UseSignalRAccessTokens_ShouldPreserveAuthorization(string authorization)
+    public async Task UseSignalR_ShouldPreserveAuthorization(string authorization)
     {
         using var services = new ServiceCollection().BuildServiceProvider();
         var app = new ApplicationBuilder(services);
-        app.UseSignalRAccessTokens("/hubs/events");
+        app.UseSignalR("/hubs/events");
         var context = new DefaultHttpContext();
         context.Request.Path = "/hubs/events";
         context.Request.QueryString = new QueryString("?access_token=other");
@@ -63,12 +63,12 @@ public sealed class AccessTokenTests
     }
 
     [Fact(DisplayName = "Hub paths are copied and matched relative to PathBase")]
-    public async Task UseSignalRAccessTokens_ShouldCopyPathsAndSupportPathBase()
+    public async Task UseSignalR_ShouldCopyPathsAndSupportPathBase()
     {
         using var services = new ServiceCollection().BuildServiceProvider();
         var app = new ApplicationBuilder(services);
         string[] paths = ["/hubs/events/"];
-        app.UseSignalRAccessTokens(paths);
+        app.UseSignalR(paths);
         paths[0] = "/api/orders";
         var context = new DefaultHttpContext();
         context.Request.PathBase = "/gateway";
@@ -92,22 +92,22 @@ public sealed class AccessTokenTests
     [InlineData("/hubs/events#fragment")]
     [InlineData("/hubs/ events")]
     [InlineData("/hubs\\events")]
-    public void UseSignalRAccessTokens_ShouldRejectInvalidPaths(string? path)
+    public void UseSignalR_ShouldRejectInvalidPaths(string? path)
     {
         using var services = new ServiceCollection().BuildServiceProvider();
         var app = new ApplicationBuilder(services);
 
-        Should.Throw<ArgumentException>(() => app.UseSignalRAccessTokens([path!]));
+        Should.Throw<ArgumentException>(() => app.UseSignalR([path!]));
     }
 
     [Fact(DisplayName = "Access token middleware validates null arguments and empty path lists")]
-    public void UseSignalRAccessTokens_ShouldValidateArguments()
+    public void UseSignalR_ShouldValidateArguments()
     {
         using var services = new ServiceCollection().BuildServiceProvider();
         var app = new ApplicationBuilder(services);
 
-        Should.Throw<ArgumentNullException>(() => ((IApplicationBuilder)null!).UseSignalRAccessTokens("/hubs/events"));
-        Should.Throw<ArgumentNullException>(() => app.UseSignalRAccessTokens(null!));
-        Should.Throw<ArgumentException>(() => app.UseSignalRAccessTokens());
+        Should.Throw<ArgumentNullException>(() => ((IApplicationBuilder)null!).UseSignalR("/hubs/events"));
+        Should.Throw<ArgumentNullException>(() => app.UseSignalR(null!));
+        Should.Throw<ArgumentException>(() => app.UseSignalR());
     }
 }

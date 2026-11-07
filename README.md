@@ -71,14 +71,17 @@ The adapter only copies the token into a Bearer header; normal validation still
 checks the token and decides access.
 
 ```csharp
-app.UseSignalRAccessTokens("/hubs/events", "/hubs/notifications");
+builder.Services.AddSignalR(builder.Configuration);
+
+var app = builder.Build();
+app.UseSignalR("/hubs/events", "/hubs/notifications");
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapHub<EventsHub>("/hubs/events").RequireAuthorization();
 ```
 
-With `PANiXiDA.Core.Presentation.Http`, call `UseSignalRAccessTokens` before
+With `PANiXiDA.Core.Presentation.Http`, call `UseSignalR` before
 `app.UseHttp()`, which owns routing, authentication and authorization. Map hubs
 afterwards. This package does not register an authentication scheme or map hubs.
 
