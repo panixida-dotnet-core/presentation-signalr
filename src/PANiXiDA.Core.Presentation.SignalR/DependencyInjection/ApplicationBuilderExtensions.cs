@@ -35,7 +35,7 @@ public static class ApplicationBuilderExtensions
         return app.Use(async (context, next) =>
         {
             var request = context.Request;
-            if (paths.Contains(request.Path.Value?.TrimEnd('/') ?? string.Empty)
+            if (paths.Contains(request.Path.ToString().TrimEnd('/'))
                 && !request.Headers.ContainsKey("Authorization")
                 && request.Query.TryGetValue("access_token", out var token)
                 && token.Count == 1 && !string.IsNullOrWhiteSpace(token[0])
