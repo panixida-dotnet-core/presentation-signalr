@@ -2,9 +2,8 @@
 
 ## Purpose
 
-This repository contains PANiXiDA.Core.Presentation.SignalR for .NET 10.
-It provides reusable SignalR registration, optional Redis backplane configuration, and access token forwarding for exact hub transport paths.
-Keep application hubs, client contracts, group naming, authorization policies, and business subscriptions in consuming applications.
+This repository is a reference template for PANiXiDA .NET NuGet packages.
+The goal is to keep package structure, CI, versioning, tests, documentation, and release flow consistent across repositories.
 
 ## Repository layout
 
