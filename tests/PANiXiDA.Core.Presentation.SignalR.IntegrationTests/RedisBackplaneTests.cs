@@ -77,7 +77,7 @@ public sealed class RedisBackplaneTests(RedisFixture redis) : IClassFixture<Redi
         });
         builder.Services.AddSignalR(builder.Configuration);
         var app = builder.Build();
-        app.MapHub<StreamingHub>("/hubs/events");
+        app.UseSignalR(hubs => hubs.MapHub<StreamingHub>("/hubs/events"));
         await app.StartAsync(TestContext.Current.CancellationToken);
         return app;
     }

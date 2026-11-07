@@ -52,7 +52,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSignalR(builder.Configuration);
 
 var app = builder.Build();
-app.MapHub<EventsHub>("/hubs/events");
+app.UseSignalR(hubs => hubs.MapHub<EventsHub>("/hubs/events"));
 app.Run();
 
 public sealed class EventsHub : Hub;
@@ -66,23 +66,25 @@ Merely configuring `ConnectionStrings:Redis` does not enable the backplane.
 ### Authentication and browser clients
 
 Configure authentication and authorization in the host, then call
-`UseSignalR` on the built `WebApplication` before authentication. The extension
-returns the same `WebApplication` for further middleware and endpoint mapping.
-Protect each hub with `.RequireAuthorization()`.
+`UseSignalR` on the built `WebApplication` before authentication. Its callback
+maps the hubs and supplies the exact transport paths used for query tokens, so
+each route is declared once. The extension returns the same `WebApplication`.
+Protect each hub with `.RequireAuthorization()` inside the mapping callback.
 The adapter only copies the token into a Bearer header; normal validation still
 checks the token and decides access.
 
 ```csharp
-app.UseSignalR("/hubs/events", "/hubs/notifications");
+app.UseSignalR(hubs =>
+    hubs.MapHub<EventsHub>("/hubs/events").RequireAuthorization());
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapHub<EventsHub>("/hubs/events").RequireAuthorization();
 ```
 
 With `PANiXiDA.Core.Presentation.Http`, call `UseSignalR` before
-`app.UseHttp()`, which owns routing, authentication and authorization. Map hubs
-afterwards. This package does not register an authentication scheme or map hubs.
+`app.UseHttp()`, which owns routing, authentication and authorization. Hubs are
+mapped inside `UseSignalR`; no separate `MapHub` call is needed afterwards.
+Authentication schemes and authorization policies remain host-owned.
 
 ```javascript
 const connection = new signalR.HubConnectionBuilder()
@@ -102,7 +104,9 @@ cannot use query tokens. Supply literal paths without query strings, route
 parameters or `PathBase`; `/gateway/hubs/events` behind a `/gateway` PathBase uses
 `/hubs/events`. Existing Authorization headers, including empty ones, take
 precedence. Missing, blank, repeated and control-character query tokens are ignored.
-Invalid hub paths or an empty path list fail immediately during pipeline configuration.
+Invalid or duplicate hub paths and callbacks that map no hubs fail immediately
+during pipeline configuration. Duplicate detection ignores case and trailing
+slashes. Trailing slashes are removed from mapped routes.
 
 ### Standard SignalR customization
 
@@ -117,8 +121,20 @@ builder.Services.AddSignalR(builder.Configuration)
 ```
 
 Use `Hub<TClient>`, `IHubContext<THub, TClient>`, standard group operations and
-standard mapping options directly. Application-specific wrappers are unnecessary
-unless they express application behavior.
+standard mapping options. The `HubMapBuilder` callback supports multiple
+`MapHub<THub>` calls and returns standard convention builders for authorization
+and metadata. Optional connection settings use the standard SignalR options:
+
+```csharp
+app.UseSignalR(hubs =>
+    hubs.MapHub<EventsHub>("/hubs/events",
+        options => options.CloseOnAuthenticationExpiration = true)
+        .RequireAuthorization());
+```
+
+The registration uses explicit generic hub types and preserves the members
+required by SignalR trimming analysis; it does not scan assemblies at runtime.
+Application-specific publishers and subscriptions remain in the application.
 
 ## Configuration
 
@@ -191,6 +207,7 @@ src/
   PANiXiDA.Core.Presentation.SignalR/
     Configurations/
     DependencyInjection/
+    Hubs/
 tests/
   PANiXiDA.Core.Presentation.SignalR.UnitTests/
   PANiXiDA.Core.Presentation.SignalR.IntegrationTests/

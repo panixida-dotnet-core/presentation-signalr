@@ -1,5 +1,8 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using PANiXiDA.Core.Presentation.SignalR.DependencyInjection;
@@ -27,7 +30,11 @@ public sealed class AccessTokenTests
     {
         // Arrange
         using var app = CreateApplication();
-        app.UseSignalR("/hubs/events", "/hubs/other").ShouldBeSameAs(app);
+        app.UseSignalR(hubs =>
+        {
+            hubs.MapHub<TokenHub>("/hubs/events");
+            hubs.MapHub<TokenHub>("/hubs/other");
+        }).ShouldBeSameAs(app);
         var nextCalled = false;
         app.Run(_ => { nextCalled = true; return Task.CompletedTask; });
         var context = new DefaultHttpContext();
@@ -49,7 +56,7 @@ public sealed class AccessTokenTests
     public async Task UseSignalR_ShouldPreserveAuthorization(string authorization)
     {
         using var app = CreateApplication();
-        app.UseSignalR("/hubs/events");
+        app.UseSignalR(hubs => hubs.MapHub<TokenHub>("/hubs/events"));
         var context = new DefaultHttpContext();
         context.Request.Path = "/hubs/events";
         context.Request.QueryString = new QueryString("?access_token=other");
@@ -65,7 +72,7 @@ public sealed class AccessTokenTests
     {
         using var app = CreateApplication();
         string[] paths = ["/hubs/events/"];
-        app.UseSignalR(paths);
+        app.UseSignalR(hubs => hubs.MapHub<TokenHub>(paths[0]));
         paths[0] = "/api/orders";
         var context = new DefaultHttpContext();
         context.Request.PathBase = "/gateway";
@@ -93,21 +100,38 @@ public sealed class AccessTokenTests
     {
         using var app = CreateApplication();
 
-        Should.Throw<ArgumentException>(() => app.UseSignalR([path!]));
+        Should.Throw<ArgumentException>(() => app.UseSignalR(hubs => hubs.MapHub<TokenHub>(path!)));
     }
 
-    [Fact(DisplayName = "Access token middleware rejects an empty hub path list")]
-    public void UseSignalR_ShouldRejectEmptyPaths()
+    [Fact(DisplayName = "SignalR mapping requires at least one hub")]
+    public void UseSignalR_ShouldRejectEmptyMapping()
     {
         using var app = CreateApplication();
 
-        Should.Throw<ArgumentException>(() => app.UseSignalR());
+        Should.Throw<ArgumentException>(() => app.UseSignalR(_ => { }));
+    }
+
+    [Theory(DisplayName = "Hub mapping rejects duplicate paths ignoring case and trailing slashes")]
+    [InlineData("/hubs/events")]
+    [InlineData("/HUBS/EVENTS/")]
+    public void UseSignalR_ShouldRejectDuplicatePaths(string secondPath)
+    {
+        using var app = CreateApplication();
+
+        Should.Throw<ArgumentException>(() => app.UseSignalR(hubs =>
+        {
+            hubs.MapHub<TokenHub>("/hubs/events");
+            hubs.MapHub<TokenHub>(secondPath);
+        }));
     }
 
     private static WebApplication CreateApplication()
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
+        builder.Services.AddSignalR(new ConfigurationBuilder().Build());
         return builder.Build();
     }
+
+    public sealed class TokenHub : Hub;
 }

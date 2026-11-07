@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.WebSockets;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
@@ -15,6 +16,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 using PANiXiDA.Core.Presentation.SignalR.DependencyInjection;
+using PANiXiDA.Core.Presentation.SignalR.Hubs;
 
 namespace PANiXiDA.Core.Presentation.SignalR.UnitTests.Hosting;
 
@@ -91,7 +93,28 @@ public sealed class SignalRHostingTests
         user.ShouldBe("test-user");
     }
 
-    private static async Task<WebApplication> CreateApplicationAsync()
+    [Fact(DisplayName = "Hub mapping applies standard connection options to negotiation")]
+    public async Task Hosting_ShouldApplyConnectionOptions()
+    {
+        await using var app = await CreateApplicationAsync(hubs =>
+            hubs.MapHub<TestHub>("/hubs/events", options => options.Transports = HttpTransportType.LongPolling)
+                .RequireAuthorization());
+        using var client = new HttpClient(new HttpClientHandler { UseProxy = false })
+        {
+            BaseAddress = new Uri(app.Urls.Single())
+        };
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/hubs/events/negotiate?negotiateVersion=1");
+        request.Headers.TryAddWithoutValidation("Authorization", "Bearer valid");
+
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        body.RootElement.GetProperty("availableTransports").EnumerateArray()
+            .Select(transport => transport.GetProperty("transport").GetString()).ShouldBe(["LongPolling"]);
+    }
+
+    private static async Task<WebApplication> CreateApplicationAsync(Action<HubMapBuilder>? configureHubs = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
@@ -100,9 +123,8 @@ public sealed class SignalRHostingTests
         builder.Services.AddAuthorization();
         builder.Services.AddSignalR(new ConfigurationBuilder().Build());
         var app = builder.Build();
-        app.UseSignalR("/hubs/events")
-            .MapHub<TestHub>("/hubs/events")
-            .RequireAuthorization();
+        app.UseSignalR(configureHubs ?? (hubs =>
+            hubs.MapHub<TestHub>("/hubs/events").RequireAuthorization()));
         app.UseRouting();
         app.UseAuthentication();
         app.UseAuthorization();

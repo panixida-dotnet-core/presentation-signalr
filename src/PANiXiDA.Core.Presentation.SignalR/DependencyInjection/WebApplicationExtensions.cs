@@ -1,33 +1,28 @@
 using Microsoft.AspNetCore.Builder;
 
+using PANiXiDA.Core.Presentation.SignalR.Hubs;
+
 namespace PANiXiDA.Core.Presentation.SignalR.DependencyInjection;
 
 /// <summary>Configures SignalR middleware for a web application.</summary>
 public static class WebApplicationExtensions
 {
-    /// <summary>Copies a single nonblank access_token query value into a missing Authorization header on exact hub paths.</summary>
+    /// <summary>Maps application hubs and forwards query access tokens only on their exact transport paths.</summary>
     /// <param name="app">The web application.</param>
-    /// <param name="hubPaths">Literal absolute hub paths, without PathBase, query strings or route parameters.</param>
+    /// <param name="configureHubs">The callback mapping hubs and configuring their authorization, metadata and connection options.</param>
     /// <returns>The original web application for further middleware and endpoint configuration.</returns>
-    /// <exception cref="ArgumentException">No paths are supplied or a path is invalid.</exception>
+    /// <exception cref="ArgumentException">No hubs are mapped or a hub path is invalid or duplicated.</exception>
     /// <remarks>Call before authentication, or before UseHttp from PANiXiDA.Core.Presentation.Http. Matching ignores case and trailing slashes; child paths including negotiate are excluded. Normal Bearer validation still runs.</remarks>
-    public static WebApplication UseSignalR(this WebApplication app, params string[] hubPaths)
+    public static WebApplication UseSignalR(this WebApplication app, Action<HubMapBuilder> configureHubs)
     {
-        if (hubPaths.Length == 0)
+        var mapping = new HubMapBuilder(app);
+        configureHubs(mapping);
+        if (mapping.Paths.Count == 0)
         {
-            throw new ArgumentException("At least one hub path must be provided.", nameof(hubPaths));
+            throw new ArgumentException("At least one hub must be mapped.", nameof(configureHubs));
         }
 
-        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in hubPaths)
-        {
-            if (!IsValidHubPath(path))
-            {
-                throw new ArgumentException("Hub paths must be literal absolute paths without whitespace, query strings or route parameters.", nameof(hubPaths));
-            }
-
-            paths.Add(path.TrimEnd('/'));
-        }
+        var paths = new HashSet<string>(mapping.Paths, StringComparer.OrdinalIgnoreCase);
 
         app.Use(async (context, next) =>
         {
@@ -47,11 +42,4 @@ public static class WebApplicationExtensions
         return app;
     }
 
-    private static bool IsValidHubPath(string? path)
-    {
-        return !string.IsNullOrWhiteSpace(path) && path.StartsWith('/')
-            && !path.StartsWith("//", StringComparison.Ordinal) && path.TrimEnd('/').Length > 0
-            && !path.Any(character => char.IsWhiteSpace(character) || char.IsControl(character))
-            && path.IndexOfAny(['?', '#', '{', '}', '*', '\\']) < 0;
-    }
 }
