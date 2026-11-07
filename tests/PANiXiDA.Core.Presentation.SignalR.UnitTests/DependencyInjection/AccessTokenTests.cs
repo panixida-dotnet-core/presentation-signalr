@@ -16,12 +16,14 @@ public sealed class AccessTokenTests
     [InlineData("/hubs/events/child", "?access_token=valid", "")]
     [InlineData("/hubs/events-extra", "?access_token=valid", "")]
     [InlineData("/api/orders", "?access_token=valid", "")]
+    [InlineData(null, "?access_token=valid", "")]
+    [InlineData("", "?access_token=valid", "")]
     [InlineData("/hubs/events", "", "")]
     [InlineData("/hubs/events", "?access_token=", "")]
     [InlineData("/hubs/events", "?access_token=%20", "")]
     [InlineData("/hubs/events", "?access_token=a&access_token=b", "")]
     [InlineData("/hubs/events", "?access_token=a%0D%0Ab", "")]
-    public async Task UseSignalRAccessTokens_ShouldRestrictForwarding(string path, string query, string expected)
+    public async Task UseSignalRAccessTokens_ShouldRestrictForwarding(string? path, string query, string expected)
     {
         // Arrange
         using var services = new ServiceCollection().BuildServiceProvider();
