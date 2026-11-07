@@ -11,7 +11,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\src\PANiXiDA.Core.Template\PANiXiDA.Core.Template.csproj" />
+      <ProjectReference Include="..\..\src\PANiXiDA.Core.Presentation.SignalR\PANiXiDA.Core.Presentation.SignalR.csproj" />
     </ItemGroup>
 
     <ItemGroup>
