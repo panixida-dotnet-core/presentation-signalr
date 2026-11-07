@@ -21,4 +21,11 @@
             <PrivateAssets>all</PrivateAssets>
         </PackageReference>
     </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../PANiXiDA.Core.Presentation.SignalR.Generators/PANiXiDA.Core.Presentation.SignalR.Generators.csproj"
+                          OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
+        <None Include="../PANiXiDA.Core.Presentation.SignalR.Generators/bin/$(Configuration)/netstandard2.0/PANiXiDA.Core.Presentation.SignalR.Generators.dll"
+              Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    </ItemGroup>
 </Project>

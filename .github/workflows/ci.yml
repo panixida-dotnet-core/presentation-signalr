@@ -12,6 +12,8 @@ permissions:
 jobs:
     format:
         uses: PANiXiDA-Infrastructure/ci-cd/.github/workflows/dotnet-format.yml@main
+        with:
+          build-before-format: true
         secrets:
           registry-user: ${{ secrets.REGISTRY_USER }}
           registry-token: ${{ secrets.REGISTRY_TOKEN }}

@@ -12,6 +12,7 @@
   },
   "pathFilters": [
     ":/src/PANiXiDA.Core.Presentation.SignalR/",
+    ":/src/PANiXiDA.Core.Presentation.SignalR.Generators/",
     ":/Directory.Build.props",
     ":/Directory.Build.targets",
     ":/Directory.Packages.props",

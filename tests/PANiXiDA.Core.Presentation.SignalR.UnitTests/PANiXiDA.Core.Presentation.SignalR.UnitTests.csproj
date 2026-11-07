@@ -6,6 +6,7 @@
     <ItemGroup>
         <FrameworkReference Include="Microsoft.AspNetCore.App" />
         <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
         <PackageReference Include="Shouldly" />
         <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
         <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
@@ -14,6 +15,8 @@
 
     <ItemGroup>
       <ProjectReference Include="..\..\src\PANiXiDA.Core.Presentation.SignalR\PANiXiDA.Core.Presentation.SignalR.csproj" />
+      <ProjectReference Include="../../src/PANiXiDA.Core.Presentation.SignalR.Generators/PANiXiDA.Core.Presentation.SignalR.Generators.csproj"
+                        OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
     </ItemGroup>
 
     <ItemGroup>

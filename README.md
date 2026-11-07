@@ -30,7 +30,7 @@ Application, Mediator, or Result packages.
 
 ### Requirements
 
-- .NET 10 SDK and ASP.NET Core runtime.
+- .NET 10 SDK with Roslyn 5.9 or later, and ASP.NET Core runtime.
 - Redis when the backplane is enabled.
 - Docker for integration tests.
 
@@ -47,15 +47,20 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using PANiXiDA.Core.Presentation.SignalR.DependencyInjection;
+using PANiXiDA.Core.Presentation.SignalR.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSignalR(builder.Configuration);
 
 var app = builder.Build();
-app.UseSignalR(hubs => hubs.MapHub<EventsHub>("/hubs/events"));
+app.UseSignalR(typeof(EventsHub).Assembly);
 app.Run();
 
-public sealed class EventsHub : Hub;
+public sealed class EventsHub : Hub, IHubEndpoint
+{
+    public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) =>
+        hubs.MapHub<EventsHub>("/hubs/events");
+}
 ```
 
 Without `SignalR:Redis`, SignalR uses its standard in-memory lifetime manager.
@@ -66,16 +71,25 @@ Merely configuring `ConnectionStrings:Redis` does not enable the backplane.
 ### Authentication and browser clients
 
 Configure authentication and authorization in the host, then call
-`UseSignalR` on the built `WebApplication` before authentication. Its callback
-maps the hubs and supplies the exact transport paths used for query tokens, so
-each route is declared once. The extension returns the same `WebApplication`.
-Protect each hub with `.RequireAuthorization()` inside the mapping callback.
+`UseSignalR` on the built `WebApplication` before authentication. Pass one
+assembly reference for each presentation module. Generated registrations map
+its concrete `IHubEndpoint` implementations and supply their exact transport
+paths for query tokens. The extension returns the same `WebApplication`.
+Protect the hub in its static `Map` method:
+
+```csharp
+public sealed class AuthorizedEventsHub : Hub, IHubEndpoint
+{
+    public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) =>
+        hubs.MapHub<AuthorizedEventsHub>("/hubs/events").RequireAuthorization();
+}
+```
+
 The adapter only copies the token into a Bearer header; normal validation still
 checks the token and decides access.
 
 ```csharp
-app.UseSignalR(hubs =>
-    hubs.MapHub<EventsHub>("/hubs/events").RequireAuthorization());
+app.UseSignalR(typeof(AuthorizedEventsHub).Assembly);
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -104,9 +118,29 @@ cannot use query tokens. Supply literal paths without query strings, route
 parameters or `PathBase`; `/gateway/hubs/events` behind a `/gateway` PathBase uses
 `/hubs/events`. Existing Authorization headers, including empty ones, take
 precedence. Missing, blank, repeated and control-character query tokens are ignored.
-Invalid or duplicate hub paths and callbacks that map no hubs fail immediately
+Invalid or duplicate hub paths and calls that map no hubs fail immediately
 during pipeline configuration. Duplicate detection ignores case and trailing
 slashes. Trailing slashes are removed from mapped routes.
+
+### Assembly discovery
+
+Reference this package directly in every project declaring mapped hubs, with
+analyzer assets enabled. The included incremental source generator emits direct
+calls to each hub's static `IHubEndpoint.Map` contract and registers them through
+a module initializer. Hub constructors are not invoked during discovery; SignalR
+still creates hub instances through the host's DI container when needed.
+
+`UseSignalR(params Assembly[] assemblies)` preserves assembly argument order and
+maps hubs in ordinal type-name order within each assembly. Repeated assembly
+arguments are ignored. Abstract and unmarked types are skipped. Accessible
+internal and nested hubs are supported. Open generic, private, protected and
+file-local hub types are rejected with `PANSIGNALRSG001`; mapping contracts on
+non-hub types produce `PANSIGNALRSG002`.
+
+An assembly without generated registration fails at startup with instructions
+to enable the package's analyzers and rebuild. Assemblies with an empty generated
+registration may accompany modules containing hubs; at least one hub must be
+mapped by the call. There is no reflection discovery or activation fallback.
 
 ### Standard SignalR customization
 
@@ -121,9 +155,10 @@ builder.Services.AddSignalR(builder.Configuration)
 ```
 
 Use `Hub<TClient>`, `IHubContext<THub, TClient>`, standard group operations and
-standard mapping options. The `HubMapBuilder` callback supports multiple
-`MapHub<THub>` calls and returns standard convention builders for authorization
-and metadata. Optional connection settings use the standard SignalR options:
+standard mapping options. Static `Map` implementations return standard
+convention builders for authorization and metadata, and accept standard
+connection options. For explicit registration, the callback overload remains
+available and supports multiple `MapHub<THub>` calls:
 
 ```csharp
 app.UseSignalR(hubs =>
@@ -132,7 +167,7 @@ app.UseSignalR(hubs =>
         .RequireAuthorization());
 ```
 
-The registration uses explicit generic hub types and preserves the members
+Generated and explicit registrations use generic hub types and preserve the members
 required by SignalR trimming analysis; it does not scan assemblies at runtime.
 Application-specific publishers and subscriptions remain in the application.
 
@@ -204,6 +239,7 @@ and [configuration source generator documentation](https://learn.microsoft.com/d
 
 ```text
 src/
+  PANiXiDA.Core.Presentation.SignalR.Generators/
   PANiXiDA.Core.Presentation.SignalR/
     Configurations/
     DependencyInjection/
@@ -242,7 +278,8 @@ package source, shared build settings, README and icon.
 
 ## Package Contents
 
-The NuGet package includes the `net10.0` library, XML documentation, README,
+The NuGet package includes the `net10.0` library, its `netstandard2.0` source
+generator under `analyzers/dotnet/cs`, XML documentation, README,
 license metadata, icon and repository metadata. Redis integration is a runtime
 package dependency; SignalR Client and Testcontainers are test-only.
 A symbols package is produced by the repository's packaging settings.

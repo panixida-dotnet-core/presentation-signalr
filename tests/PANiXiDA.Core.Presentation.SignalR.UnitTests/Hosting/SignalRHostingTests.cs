@@ -24,6 +24,7 @@ public sealed class SignalRHostingTests
 {
     [Theory(DisplayName = "Query token forwarding preserves host authentication and excludes negotiation and unrelated routes")]
     [InlineData("/hubs/events?access_token=valid", false, null, HttpStatusCode.BadRequest)]
+    [InlineData("/hubs/other?access_token=valid", false, null, HttpStatusCode.BadRequest)]
     [InlineData("/hubs/events?access_token=invalid", false, null, HttpStatusCode.Unauthorized)]
     [InlineData("/hubs/events?access_token=valid", false, "Bearer invalid", HttpStatusCode.Unauthorized)]
     [InlineData("/hubs/events/negotiate?negotiateVersion=1&access_token=valid", true, null, HttpStatusCode.Unauthorized)]
@@ -114,6 +115,14 @@ public sealed class SignalRHostingTests
             .Select(transport => transport.GetProperty("transport").GetString()).ShouldBe(["LongPolling"]);
     }
 
+    [Fact(DisplayName = "Automatic mapping does not activate hubs with constructor dependencies")]
+    public async Task Hosting_ShouldDeferHubActivation()
+    {
+        await using var app = await CreateApplicationAsync();
+
+        app.Services.GetRequiredService<ActivationCounter>().Count.ShouldBe(0);
+    }
+
     private static async Task<WebApplication> CreateApplicationAsync(Action<HubMapBuilder>? configureHubs = null)
     {
         var builder = WebApplication.CreateBuilder();
@@ -121,10 +130,17 @@ public sealed class SignalRHostingTests
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddAuthentication("TestBearer").AddScheme<AuthenticationSchemeOptions, TestBearerHandler>("TestBearer", _ => { });
         builder.Services.AddAuthorization();
+        builder.Services.AddSingleton<ActivationCounter>();
         builder.Services.AddSignalR(new ConfigurationBuilder().Build());
         var app = builder.Build();
-        app.UseSignalR(configureHubs ?? (hubs =>
-            hubs.MapHub<TestHub>("/hubs/events").RequireAuthorization()));
+        if (configureHubs is null)
+        {
+            app.UseSignalR(typeof(SignalRHostingTests).Assembly);
+        }
+        else
+        {
+            app.UseSignalR(configureHubs);
+        }
         app.UseRouting();
         app.UseAuthentication();
         app.UseAuthorization();
@@ -133,9 +149,28 @@ public sealed class SignalRHostingTests
         return app;
     }
 
-    public sealed class TestHub : Hub
+    public sealed class TestHub : Hub, IHubEndpoint
     {
+        public TestHub(ActivationCounter counter)
+        {
+            counter.Count++;
+        }
+
+        public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) =>
+            hubs.MapHub<TestHub>("/hubs/events").RequireAuthorization();
+
         public string GetUser() => Context.User!.FindFirstValue(ClaimTypes.NameIdentifier)!;
+    }
+
+    public sealed class OtherHub : Hub, IHubEndpoint
+    {
+        public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) =>
+            hubs.MapHub<OtherHub>("/hubs/other").RequireAuthorization();
+    }
+
+    public sealed class ActivationCounter
+    {
+        public int Count { get; set; }
     }
 
     private sealed class TestBearerHandler(

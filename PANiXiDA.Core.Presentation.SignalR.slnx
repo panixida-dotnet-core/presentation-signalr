@@ -16,6 +16,7 @@
     <File Path="version.json" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/PANiXiDA.Core.Presentation.SignalR.Generators/PANiXiDA.Core.Presentation.SignalR.Generators.csproj" />
     <Project Path="src/PANiXiDA.Core.Presentation.SignalR/PANiXiDA.Core.Presentation.SignalR.csproj" />
   </Folder>
   <Folder Name="/tests/">
