@@ -164,6 +164,24 @@ configured backplane.
 See Microsoft's [Redis backplane guidance](https://learn.microsoft.com/aspnet/core/signalr/redis-backplane?view=aspnetcore-10.0)
 and [SignalR authentication guidance](https://learn.microsoft.com/aspnet/core/signalr/authn-and-authz?view=aspnetcore-10.0).
 
+### Native AOT
+
+The library enables `IsAotCompatible` and `EnableConfigurationBindingGenerator`.
+AOT/trimming analyzers run during library builds, and Redis options binding uses
+generated code. These settings do not enable Native AOT publishing in consuming
+applications; the host controls `PublishAot` and must validate its own dependencies
+and hub implementations.
+
+For Native AOT hosts, use the JSON protocol with a source-generated
+`JsonSerializerContext` covering every hub payload type. Register that context in
+`JsonHubProtocolOptions.PayloadSerializerOptions.TypeInfoResolverChain`. Use
+ordinary `Hub` and `IHubContext<THub>`: strongly typed `Hub<TClient>` and
+`IHubContext<THub, TClient>` require runtime proxy generation and are not supported
+by Native AOT. They remain available for normal JIT deployments.
+
+See Microsoft's [SignalR Native AOT guidance](https://learn.microsoft.com/aspnet/core/release-notes/aspnetcore-9.0#signalr-supports-trimming-and-native-aot)
+and [configuration source generator documentation](https://learn.microsoft.com/dotnet/core/extensions/configuration-generator).
+
 ## Project Structure
 
 ```text
