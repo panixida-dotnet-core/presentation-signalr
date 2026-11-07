@@ -1,276 +1,213 @@
-## What to do after creating a repository from this template
+# PANiXiDA.Core.Presentation.SignalR
 
-### 3. Update documentation
-- replace this template README with the project README
-- fill all placeholder sections
-- update badges
-- update installation instructions
-- add real usage examples
-
-### 4. Configure GitHub repository
-- register the repository in the shared SonarQube inventory
-
-### 5. Prepare the first release
-- verify NuGet metadata
-- verify README and icon inside the package
-- publish the first package version
-- the version is updated automatically based on the commit history
-
----
-
-# Universal README template for the NuGet package
-
-# <PackageName>
-
-`<PackageName>` is a .NET library for <short purpose>.
-
-It is designed for <target audience> who need <main value / main scenario>.
+Reusable ASP.NET Core SignalR registration, optional Redis backplane configuration,
+and browser access token forwarding for .NET 10.
 
 ## Status
 
-[![CI](https://github.com/<OWNER>/<REPOSITORY>/actions/workflows/ci.yml/badge.svg)](https://github.com/<OWNER>/<REPOSITORY>/actions/workflows/ci.yml)
-[![NuGet](https://img.shields.io/nuget/v/<PACKAGE_ID>.svg)](https://www.nuget.org/packages/<PACKAGE_ID>)
-[![NuGet downloads](https://img.shields.io/nuget/dt/<PACKAGE_ID>.svg)](https://www.nuget.org/packages/<PACKAGE_ID>)
+[![CI](https://github.com/panixida-dotnet-core/presentation-signalr/actions/workflows/ci.yml/badge.svg)](https://github.com/panixida-dotnet-core/presentation-signalr/actions/workflows/ci.yml)
+[![NuGet](https://img.shields.io/nuget/v/PANiXiDA.Core.Presentation.SignalR.svg)](https://www.nuget.org/packages/PANiXiDA.Core.Presentation.SignalR)
+[![NuGet downloads](https://img.shields.io/nuget/dt/PANiXiDA.Core.Presentation.SignalR.svg)](https://www.nuget.org/packages/PANiXiDA.Core.Presentation.SignalR)
 [![Target Framework](https://img.shields.io/badge/target-net10.0-512BD4)](https://dotnet.microsoft.com/)
-[![License](https://img.shields.io/github/license/<OWNER>/<REPOSITORY>.svg)](LICENSE)
+[![License](https://img.shields.io/github/license/panixida-dotnet-core/presentation-signalr.svg)](LICENSE)
 
 ## Overview
 
-Describe:
-
-- what problem this package solves;
-- why it exists;
-- where it fits in the system or ecosystem;
-- how it differs from alternatives, if that matters.
-
-Keep this section short and practical.
+Register the package once in the host's composition root. Applications own hubs,
+client contracts, authorization policies, group names, business subscriptions,
+and message delivery semantics. There is no dependency on the HTTP presentation,
+Application, Mediator, or Result packages.
 
 ## Features
 
-- Feature 1
-- Feature 2
-- Feature 3
-- Feature 4
-- Feature 5
+- Standard SignalR services and builder for additional configuration.
+- Optional Redis backplane using a named connection string and a literal channel prefix.
+- Startup validation of Redis configuration without printing credentials.
+- Query token forwarding restricted to explicitly registered hub transport paths.
+- Existing Authorization headers and host authentication remain authoritative.
 
 ## Quick Start
 
 ### Requirements
 
-- .NET 10 SDK
+- .NET 10 SDK and ASP.NET Core runtime.
+- Redis when the backplane is enabled.
+- Docker for integration tests.
 
 ### Installation
 
-```xml
-<ItemGroup>
-  <PackageReference Include="<PACKAGE_ID>" Version="..." />
-</ItemGroup>
-````
-
-### Minimal import
-
-```csharp
-using <RootNamespace>;
+```bash
+dotnet add package PANiXiDA.Core.Presentation.SignalR
 ```
 
-### First example
+### Minimal setup
 
 ```csharp
-// Add a minimal example here
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
+using PANiXiDA.Core.Presentation.SignalR.DependencyInjection;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSignalR(builder.Configuration);
+
+var app = builder.Build();
+app.MapHub<EventsHub>("/hubs/events");
+app.Run();
+
+public sealed class EventsHub : Hub;
 ```
+
+Without `SignalR:Redis`, SignalR uses its standard in-memory lifetime manager.
+Merely configuring `ConnectionStrings:Redis` does not enable the backplane.
 
 ## Usage
 
-### Basic usage
+### Authentication and browser clients
+
+Configure authentication and authorization in the host, then register the token
+adapter before authentication. Protect each hub with `.RequireAuthorization()`.
+The adapter only copies the token into a Bearer header; normal validation still
+checks the token and decides access.
 
 ```csharp
-// Add a basic example here
+app.UseSignalRAccessTokens("/hubs/events", "/hubs/notifications");
+app.UseRouting();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapHub<EventsHub>("/hubs/events").RequireAuthorization();
 ```
 
-### Typical scenario
+With `PANiXiDA.Core.Presentation.Http`, call `UseSignalRAccessTokens` before
+`app.UseHttp()`, which owns routing, authentication and authorization. Map hubs
+afterwards. This package does not register an authentication scheme or map hubs.
+
+```javascript
+const connection = new signalR.HubConnectionBuilder()
+  .withUrl('/hubs/events', { accessTokenFactory: () => accessToken })
+  .withAutomaticReconnect()
+  .build();
+await connection.start();
+```
+
+Use the standard SignalR client negotiation and transport selection. Browser
+WebSocket and Server-Sent Events requests can provide `access_token` in the query.
+Negotiation uses normal header authentication.
+
+Path matching is exact, case insensitive, and ignores trailing slashes. Child
+routes such as `/hubs/events/negotiate`, sibling paths, and ordinary API endpoints
+cannot use query tokens. Supply literal paths without query strings, route
+parameters or `PathBase`; `/gateway/hubs/events` behind a `/gateway` PathBase uses
+`/hubs/events`. Existing Authorization headers, including empty ones, take
+precedence. Missing, blank, repeated and control-character query tokens are ignored.
+Invalid arguments fail immediately during registration.
+
+### Standard SignalR customization
+
+The registration method returns `ISignalRServerBuilder`:
 
 ```csharp
-// Add a realistic example here
+builder.Services.AddSignalR(builder.Configuration)
+  .AddHubOptions<EventsHub>(options =>
+  {
+      options.MaximumReceiveMessageSize = 32 * 1024;
+  });
 ```
 
-### Advanced scenario
-
-```csharp
-// Add an advanced example here if needed
-```
+Use `Hub<TClient>`, `IHubContext<THub, TClient>`, standard group operations and
+standard mapping options directly. Application-specific wrappers are unnecessary
+unless they express application behavior.
 
 ## Configuration
 
-Describe configuration only if the package actually requires it.
+Enable Redis with the `SignalR:Redis` section:
 
-Possible topics:
+```json
+{
+  "ConnectionStrings": {
+    "Redis": "localhost:6379"
+  },
+  "SignalR": {
+    "Redis": {
+      "ConnectionStringName": "Redis",
+      "ChannelPrefix": "my-application:development"
+    }
+  }
+}
+```
 
-* environment variables;
-* `appsettings.json`;
-* feature flags;
-* external services;
-* secrets;
-* runtime prerequisites.
+`ConnectionStringName` defaults to `Redis`. When the section exists, a nonblank
+connection string with a Redis endpoint and a nonblank `ChannelPrefix` are
+required. Invalid settings fail during application startup. Validation checks
+configuration syntax, not server availability. Settings require an application
+restart; configure Redis transport details such as TLS, credentials and timeouts
+in the connection string. Supply production credentials through the host's secret
+store, for example `ConnectionStrings__Redis`.
 
-If the package does not require runtime configuration, say so explicitly.
+All replicas of one application/environment must use the same channel prefix.
+Different applications and environments must use different prefixes to isolate
+messages on a shared Redis server. All hubs registered in one host share the
+configured backplane.
+
+### Hosting and delivery
+
+- Run Redis close to the API replicas and allow the necessary Pub/Sub commands.
+- Configure load balancer session affinity for standard negotiated connections.
+- Configure host CORS policies for browser clients on other origins.
+- Use HTTPS and redact `access_token` from request and proxy logs.
+- Redis backplane does not persist or replay messages during an outage.
+- Reconnects and initial snapshots remain application responsibilities.
+- An established connection does not automatically revalidate token revocation.
+  Use the standard `CloseOnAuthenticationExpiration` hub mapping option when
+  expiry should close a connection; immediate revocation needs host-specific handling.
+
+See Microsoft's [Redis backplane guidance](https://learn.microsoft.com/aspnet/core/signalr/redis-backplane?view=aspnetcore-10.0)
+and [SignalR authentication guidance](https://learn.microsoft.com/aspnet/core/signalr/authn-and-authz?view=aspnetcore-10.0).
 
 ## Project Structure
 
 ```text
-.
-├── src/
-│   └── <ProjectName>/
-├── tests/
-│   └── <ProjectName>.UnitTests/
-├── .editorconfig
-├── .gitattributes
-├── .gitignore
-├── Directory.Build.props
-├── Directory.Build.targets
-├── Directory.Packages.props
-├── global.json
-├── version.json
-├── LICENSE
-└── README.md
+src/
+  PANiXiDA.Core.Presentation.SignalR/
+    Configuration/
+    DependencyInjection/
+tests/
+  PANiXiDA.Core.Presentation.SignalR.UnitTests/
+  PANiXiDA.Core.Presentation.SignalR.IntegrationTests/
 ```
-
-### Main repository files
-
-* `src/` — source code
-* `tests/` — automated tests
-* `Directory.Build.props` — shared MSBuild settings
-* `Directory.Build.targets` — shared build / packaging settings
-* `Directory.Packages.props` — centralized package versions
-* `global.json` — SDK and tooling configuration
-* `version.json` — versioning configuration
-* `README.md` — package overview and usage documentation
 
 ## Development
 
-### Build
-
 ```bash
 dotnet restore
-dotnet build --configuration Release
-```
-
-### Format
-
-```bash
 dotnet format
-```
-
-### Test
-
-```bash
+dotnet build --configuration Release
 dotnet test --configuration Release
+dotnet pack --configuration Release
 ```
 
-### Pack
+Integration tests start an isolated Redis container with Testcontainers and clean
+it up afterwards. They exercise delivery between independent application hosts.
+To run only the tests that do not require Docker:
 
 ```bash
-dotnet pack --configuration Release
+dotnet test --project tests/PANiXiDA.Core.Presentation.SignalR.UnitTests/PANiXiDA.Core.Presentation.SignalR.UnitTests.csproj --configuration Release
 ```
 
 ### Continuous integration
 
 Every pull request and push to `main` runs formatting, tests, and mandatory
-SonarQube analysis. Publishing from `main` starts only after the SonarQube
-Quality Gate succeeds.
+SonarQube analysis. Publishing starts only after formatting, tests and the
+SonarQube Quality Gate succeed. Versioning uses Nerdbank.GitVersioning and tracks
+package source, shared build settings, README and icon.
 
-### Full local validation
+## Package Contents
 
-```bash
-dotnet restore
-dotnet format
-dotnet build --configuration Release
-dotnet test --configuration Release
-dotnet pack --configuration Release
-```
-
-### Tooling and conventions
-
-This repository uses:
-
-* .NET 10
-* Nullable enabled
-* Implicit usings enabled
-* Central package management
-* GitHub Actions
-* SonarQube
-* Nerdbank.GitVersioning
-
-Add more items only if they are actually relevant for the repository.
-
-## API / Contracts / Examples
-
-Describe the public API surface here.
-
-Suggested structure:
-
-* core abstractions;
-* main entry points;
-* key extension methods;
-* important behavioral notes;
-* typical integration examples.
-
-## Roadmap / TODO
-
-Potential future improvements:
-
-* item 1;
-* item 2;
-* item 3.
-
-Remove this section if it does not provide value.
-
-## Contributing
-
-Contributions are welcome.
-
-### General rules
-
-* keep the public API intentional;
-* avoid unnecessary dependencies;
-* preserve repository conventions;
-* do not introduce breaking changes without review;
-* keep documentation updated.
-
-### Code style
-
-* follow the repository `.editorconfig`;
-* prefer readable and explicit code;
-* keep naming consistent with the existing codebase.
-
-### Tests
-
-* add or update tests for meaningful behavior changes;
-* cover both success and failure scenarios where applicable;
-* add regression tests for bug fixes.
-
-### Validation before completion
-
-Run:
-
-```bash
-dotnet restore
-dotnet format
-dotnet build --configuration Release
-dotnet test --configuration Release
-```
+The NuGet package includes the `net10.0` library, XML documentation, README,
+license metadata, icon and repository metadata. Redis integration is a runtime
+package dependency; TestHost, SignalR Client and Testcontainers are test-only.
+A symbols package is produced by the repository's packaging settings.
 
 ## License
 
-This project is licensed under the <LicenseName> license.
-
-See the [LICENSE](LICENSE) file for details.
-
-## Maintainers / Contacts
-
-Maintained by <Author / Team / Organization>.
-
-For questions or improvements, use:
-
-* GitHub Issues
-* Pull Requests
-* GitHub Discussions, if enabled
+Licensed under Apache-2.0. See [LICENSE](LICENSE).
