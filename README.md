@@ -65,20 +65,22 @@ Merely configuring `ConnectionStrings:Redis` does not enable the backplane.
 
 ### Authentication and browser clients
 
-Configure authentication and authorization in the host, then register the token
-adapter before authentication. Protect each hub with `.RequireAuthorization()`.
+Configure authentication and authorization in the host, then call
+`UseSignalR` on the built `WebApplication` before authentication. The extension
+returns the same `WebApplication` for further middleware and endpoint mapping.
+Protect each hub with `.RequireAuthorization()`.
 The adapter only copies the token into a Bearer header; normal validation still
 checks the token and decides access.
 
 ```csharp
-app.UseSignalRAccessTokens("/hubs/events", "/hubs/notifications");
+app.UseSignalR("/hubs/events", "/hubs/notifications");
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapHub<EventsHub>("/hubs/events").RequireAuthorization();
 ```
 
-With `PANiXiDA.Core.Presentation.Http`, call `UseSignalRAccessTokens` before
+With `PANiXiDA.Core.Presentation.Http`, call `UseSignalR` before
 `app.UseHttp()`, which owns routing, authentication and authorization. Map hubs
 afterwards. This package does not register an authentication scheme or map hubs.
 

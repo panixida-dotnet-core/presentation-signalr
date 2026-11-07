@@ -100,11 +100,12 @@ public sealed class SignalRHostingTests
         builder.Services.AddAuthorization();
         builder.Services.AddSignalR(new ConfigurationBuilder().Build());
         var app = builder.Build();
-        app.UseSignalRAccessTokens("/hubs/events");
+        app.UseSignalR("/hubs/events")
+            .MapHub<TestHub>("/hubs/events")
+            .RequireAuthorization();
         app.UseRouting();
         app.UseAuthentication();
         app.UseAuthorization();
-        app.MapHub<TestHub>("/hubs/events").RequireAuthorization();
         app.MapGet("/api/private", () => "authorized").RequireAuthorization();
         await app.StartAsync(TestContext.Current.CancellationToken);
         return app;

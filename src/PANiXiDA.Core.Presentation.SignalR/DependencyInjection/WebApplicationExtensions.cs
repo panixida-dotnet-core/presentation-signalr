@@ -2,16 +2,16 @@ using Microsoft.AspNetCore.Builder;
 
 namespace PANiXiDA.Core.Presentation.SignalR.DependencyInjection;
 
-/// <summary>Configures access token forwarding for SignalR transport requests.</summary>
-public static class ApplicationBuilderExtensions
+/// <summary>Configures SignalR middleware for a web application.</summary>
+public static class WebApplicationExtensions
 {
     /// <summary>Copies a single nonblank access_token query value into a missing Authorization header on exact hub paths.</summary>
-    /// <param name="app">The application pipeline builder.</param>
+    /// <param name="app">The web application.</param>
     /// <param name="hubPaths">Literal absolute hub paths, without PathBase, query strings or route parameters.</param>
-    /// <returns>The original application builder.</returns>
+    /// <returns>The original web application for further middleware and endpoint configuration.</returns>
     /// <exception cref="ArgumentException">No paths are supplied or a path is invalid.</exception>
     /// <remarks>Call before authentication, or before UseHttp from PANiXiDA.Core.Presentation.Http. Matching ignores case and trailing slashes; child paths including negotiate are excluded. Normal Bearer validation still runs.</remarks>
-    public static IApplicationBuilder UseSignalRAccessTokens(this IApplicationBuilder app, params string[] hubPaths)
+    public static WebApplication UseSignalR(this WebApplication app, params string[] hubPaths)
     {
         if (hubPaths.Length == 0)
         {
@@ -29,7 +29,7 @@ public static class ApplicationBuilderExtensions
             paths.Add(path.TrimEnd('/'));
         }
 
-        return app.Use(async (context, next) =>
+        app.Use(async (context, next) =>
         {
             var request = context.Request;
             if (paths.Contains(request.Path.ToString().TrimEnd('/'))
@@ -43,6 +43,8 @@ public static class ApplicationBuilderExtensions
 
             await next(context);
         });
+
+        return app;
     }
 
     private static bool IsValidHubPath(string? path)

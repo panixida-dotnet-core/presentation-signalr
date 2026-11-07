@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 using PANiXiDA.Core.Presentation.SignalR.DependencyInjection;
 
@@ -23,12 +23,11 @@ public sealed class AccessTokenTests
     [InlineData("/hubs/events", "?access_token=%20", "")]
     [InlineData("/hubs/events", "?access_token=a&access_token=b", "")]
     [InlineData("/hubs/events", "?access_token=a%0D%0Ab", "")]
-    public async Task UseSignalRAccessTokens_ShouldRestrictForwarding(string? path, string query, string expected)
+    public async Task UseSignalR_ShouldRestrictForwarding(string? path, string query, string expected)
     {
         // Arrange
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var app = new ApplicationBuilder(services);
-        app.UseSignalRAccessTokens("/hubs/events", "/hubs/other").ShouldBeSameAs(app);
+        using var app = CreateApplication();
+        app.UseSignalR("/hubs/events", "/hubs/other").ShouldBeSameAs(app);
         var nextCalled = false;
         app.Run(_ => { nextCalled = true; return Task.CompletedTask; });
         var context = new DefaultHttpContext();
@@ -36,7 +35,7 @@ public sealed class AccessTokenTests
         context.Request.QueryString = new QueryString(query);
 
         // Act
-        await app.Build()(context);
+        await ((IApplicationBuilder)app).Build()(context);
 
         // Assert
         context.Request.Headers.Authorization.ToString().ShouldBe(expected);
@@ -47,35 +46,33 @@ public sealed class AccessTokenTests
     [InlineData("Bearer original")]
     [InlineData("Basic original")]
     [InlineData("")]
-    public async Task UseSignalRAccessTokens_ShouldPreserveAuthorization(string authorization)
+    public async Task UseSignalR_ShouldPreserveAuthorization(string authorization)
     {
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var app = new ApplicationBuilder(services);
-        app.UseSignalRAccessTokens("/hubs/events");
+        using var app = CreateApplication();
+        app.UseSignalR("/hubs/events");
         var context = new DefaultHttpContext();
         context.Request.Path = "/hubs/events";
         context.Request.QueryString = new QueryString("?access_token=other");
         context.Request.Headers.Authorization = authorization;
 
-        await app.Build()(context);
+        await ((IApplicationBuilder)app).Build()(context);
 
         context.Request.Headers.Authorization.ToString().ShouldBe(authorization);
     }
 
     [Fact(DisplayName = "Hub paths are copied and matched relative to PathBase")]
-    public async Task UseSignalRAccessTokens_ShouldCopyPathsAndSupportPathBase()
+    public async Task UseSignalR_ShouldCopyPathsAndSupportPathBase()
     {
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var app = new ApplicationBuilder(services);
+        using var app = CreateApplication();
         string[] paths = ["/hubs/events/"];
-        app.UseSignalRAccessTokens(paths);
+        app.UseSignalR(paths);
         paths[0] = "/api/orders";
         var context = new DefaultHttpContext();
         context.Request.PathBase = "/gateway";
         context.Request.Path = "/hubs/events";
         context.Request.QueryString = new QueryString("?access_token=valid");
 
-        await app.Build()(context);
+        await ((IApplicationBuilder)app).Build()(context);
 
         context.Request.Headers.Authorization.ToString().ShouldBe("Bearer valid");
     }
@@ -92,20 +89,25 @@ public sealed class AccessTokenTests
     [InlineData("/hubs/events#fragment")]
     [InlineData("/hubs/ events")]
     [InlineData("/hubs\\events")]
-    public void UseSignalRAccessTokens_ShouldRejectInvalidPaths(string? path)
+    public void UseSignalR_ShouldRejectInvalidPaths(string? path)
     {
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var app = new ApplicationBuilder(services);
+        using var app = CreateApplication();
 
-        Should.Throw<ArgumentException>(() => app.UseSignalRAccessTokens([path!]));
+        Should.Throw<ArgumentException>(() => app.UseSignalR([path!]));
     }
 
     [Fact(DisplayName = "Access token middleware rejects an empty hub path list")]
-    public void UseSignalRAccessTokens_ShouldRejectEmptyPaths()
+    public void UseSignalR_ShouldRejectEmptyPaths()
     {
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var app = new ApplicationBuilder(services);
+        using var app = CreateApplication();
 
-        Should.Throw<ArgumentException>(() => app.UseSignalRAccessTokens());
+        Should.Throw<ArgumentException>(() => app.UseSignalR());
+    }
+
+    private static WebApplication CreateApplication()
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Logging.ClearProviders();
+        return builder.Build();
     }
 }
