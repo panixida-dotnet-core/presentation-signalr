@@ -187,7 +187,7 @@ and [configuration source generator documentation](https://learn.microsoft.com/d
 ```text
 src/
   PANiXiDA.Core.Presentation.SignalR/
-    Configuration/
+    Configurations/
     DependencyInjection/
 tests/
   PANiXiDA.Core.Presentation.SignalR.UnitTests/

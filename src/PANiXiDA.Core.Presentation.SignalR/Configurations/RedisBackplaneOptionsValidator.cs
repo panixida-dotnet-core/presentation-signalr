@@ -3,7 +3,7 @@ using Microsoft.Extensions.Options;
 
 using StackExchange.Redis;
 
-namespace PANiXiDA.Core.Presentation.SignalR.Configuration;
+namespace PANiXiDA.Core.Presentation.SignalR.Configurations;
 
 internal sealed class RedisBackplaneOptionsValidator(IConfiguration configuration)
     : IValidateOptions<RedisBackplaneOptions>

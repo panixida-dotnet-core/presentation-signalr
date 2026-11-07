@@ -1,4 +1,4 @@
-namespace PANiXiDA.Core.Presentation.SignalR.Configuration;
+namespace PANiXiDA.Core.Presentation.SignalR.Configurations;
 
 /// <summary>Configures the optional Redis backplane shared by the application's hubs.</summary>
 public sealed class RedisBackplaneOptions

@@ -4,7 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
-using PANiXiDA.Core.Presentation.SignalR.Configuration;
+using PANiXiDA.Core.Presentation.SignalR.Configurations;
 
 using StackExchange.Redis;
 
