@@ -208,11 +208,10 @@ public sealed class HubRegistrationGeneratorTests
 
     private static RouteEndpoint[] HubEndpoints(WebApplication app)
     {
-        return ((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints)
+        return [.. ((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints)
             .OfType<RouteEndpoint>()
             .Where(endpoint => endpoint.Metadata.GetMetadata<HubMetadata>() is not null
-                && !endpoint.RoutePattern.RawText!.EndsWith("/negotiate", StringComparison.Ordinal))
-            .ToArray();
+                && !endpoint.RoutePattern.RawText!.EndsWith("/negotiate", StringComparison.Ordinal))];
     }
 
     private static Assembly Load(Compilation compilation, AssemblyLoadContext context)
