@@ -204,6 +204,8 @@ dotnet test --configuration Release
 dotnet pack --configuration Release
 ```
 
+Hosting tests start Kestrel on `127.0.0.1` with an OS-assigned port and use real
+HTTP, WebSocket and Long Polling connections. Authentication uses a test handler.
 Integration tests start an isolated Redis container with Testcontainers and clean
 it up afterwards. They exercise delivery between independent application hosts.
 To run only the tests that do not require Docker:
@@ -223,7 +225,7 @@ package source, shared build settings, README and icon.
 
 The NuGet package includes the `net10.0` library, XML documentation, README,
 license metadata, icon and repository metadata. Redis integration is a runtime
-package dependency; TestHost, SignalR Client and Testcontainers are test-only.
+package dependency; SignalR Client and Testcontainers are test-only.
 A symbols package is produced by the repository's packaging settings.
 
 ## License

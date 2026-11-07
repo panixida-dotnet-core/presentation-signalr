@@ -1,13 +1,14 @@
 using System.Net;
+using System.Net.WebSockets;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -30,8 +31,10 @@ public sealed class SignalRHostingTests
     public async Task Hosting_ShouldUseNormalAuthentication(string path, bool post, string? authorization, HttpStatusCode expected)
     {
         await using var app = await CreateApplicationAsync();
-        var server = app.GetTestServer();
-        using var client = server.CreateClient();
+        using var client = new HttpClient(new HttpClientHandler { UseProxy = false })
+        {
+            BaseAddress = new Uri(app.Urls.Single())
+        };
         using var request = new HttpRequestMessage(post ? HttpMethod.Post : HttpMethod.Get, path);
         if (authorization is not null)
         {
@@ -49,18 +52,36 @@ public sealed class SignalRHostingTests
     public async Task Hosting_ShouldSupportSignalRClient(HttpTransportType transport)
     {
         await using var app = await CreateApplicationAsync();
-        var server = app.GetTestServer();
         await using var connection = new HubConnectionBuilder()
-            .WithUrl("http://localhost/hubs/events", options =>
+            .WithUrl($"{app.Urls.Single()}/hubs/events", options =>
             {
                 options.Transports = transport;
-                options.HttpMessageHandlerFactory = _ => server.CreateHandler();
+                options.HttpMessageHandlerFactory = handler =>
+                {
+                    if (handler is HttpClientHandler clientHandler)
+                    {
+                        clientHandler.UseProxy = false;
+                    }
+
+                    return handler;
+                };
                 options.AccessTokenProvider = () => Task.FromResult<string?>("valid");
                 options.WebSocketFactory = async (context, cancellationToken) =>
                 {
                     var uri = new UriBuilder(context.Uri);
                     uri.Query = $"{uri.Query.TrimStart('?')}&access_token=valid";
-                    return await server.CreateWebSocketClient().ConnectAsync(uri.Uri, cancellationToken);
+                    var socket = new ClientWebSocket();
+                    socket.Options.Proxy = null;
+                    try
+                    {
+                        await socket.ConnectAsync(uri.Uri, cancellationToken);
+                        return socket;
+                    }
+                    catch
+                    {
+                        socket.Dispose();
+                        throw;
+                    }
                 };
             }).Build();
 
@@ -74,7 +95,7 @@ public sealed class SignalRHostingTests
     {
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
-        builder.WebHost.UseTestServer();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddAuthentication("TestBearer").AddScheme<AuthenticationSchemeOptions, TestBearerHandler>("TestBearer", _ => { });
         builder.Services.AddAuthorization();
         builder.Services.AddSignalR(new ConfigurationBuilder().Build());

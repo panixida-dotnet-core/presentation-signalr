@@ -6,7 +6,6 @@
     <ItemGroup>
         <FrameworkReference Include="Microsoft.AspNetCore.App" />
         <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
-        <PackageReference Include="Microsoft.AspNetCore.TestHost" />
         <PackageReference Include="Shouldly" />
         <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
         <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
