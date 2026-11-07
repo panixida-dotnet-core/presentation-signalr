@@ -71,17 +71,14 @@ The adapter only copies the token into a Bearer header; normal validation still
 checks the token and decides access.
 
 ```csharp
-builder.Services.AddSignalR(builder.Configuration);
-
-var app = builder.Build();
-app.UseSignalR("/hubs/events", "/hubs/notifications");
+app.UseSignalRAccessTokens("/hubs/events", "/hubs/notifications");
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapHub<EventsHub>("/hubs/events").RequireAuthorization();
 ```
 
-With `PANiXiDA.Core.Presentation.Http`, call `UseSignalR` before
+With `PANiXiDA.Core.Presentation.Http`, call `UseSignalRAccessTokens` before
 `app.UseHttp()`, which owns routing, authentication and authorization. Map hubs
 afterwards. This package does not register an authentication scheme or map hubs.
 
@@ -103,7 +100,7 @@ cannot use query tokens. Supply literal paths without query strings, route
 parameters or `PathBase`; `/gateway/hubs/events` behind a `/gateway` PathBase uses
 `/hubs/events`. Existing Authorization headers, including empty ones, take
 precedence. Missing, blank, repeated and control-character query tokens are ignored.
-Invalid arguments fail immediately during registration.
+Invalid hub paths or an empty path list fail immediately during pipeline configuration.
 
 ### Standard SignalR customization
 

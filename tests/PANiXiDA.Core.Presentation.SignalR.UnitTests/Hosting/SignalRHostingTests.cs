@@ -100,7 +100,7 @@ public sealed class SignalRHostingTests
         builder.Services.AddAuthorization();
         builder.Services.AddSignalR(new ConfigurationBuilder().Build());
         var app = builder.Build();
-        app.UseSignalR("/hubs/events");
+        app.UseSignalRAccessTokens("/hubs/events");
         app.UseRouting();
         app.UseAuthentication();
         app.UseAuthorization();

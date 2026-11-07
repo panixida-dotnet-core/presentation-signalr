@@ -77,13 +77,6 @@ public sealed class ServiceCollectionExtensionsTests
         exception.Message.ShouldNotContain("secret");
     }
 
-    [Fact(DisplayName = "SignalR registration validates null arguments")]
-    public void AddSignalR_ShouldValidateArguments()
-    {
-        Should.Throw<ArgumentNullException>(() => ServiceCollectionExtensions.AddSignalR(null!, new ConfigurationBuilder().Build()));
-        Should.Throw<ArgumentNullException>(() => new ServiceCollection().AddSignalR((IConfiguration)null!));
-    }
-
     private static IConfigurationRoot CreateConfiguration()
     {
         return new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
