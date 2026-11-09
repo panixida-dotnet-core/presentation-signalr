@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 using PANiXiDA.Core.Presentation.SignalR.Configurations;
+using PANiXiDA.Core.Presentation.SignalR.Hubs;
 using PANiXiDA.Core.Presentation.SignalR.Logging;
 
 using StackExchange.Redis;
@@ -24,8 +25,13 @@ public static class ServiceCollectionExtensions
         IConfiguration configuration)
     {
         var builder = services.AddSignalR().AddJsonConfiguration();
+        services.AddSingleton<HubExceptionFilter>();
         services.AddSingleton<HubLoggingFilter>();
-        services.Configure<HubOptions>(options => options.AddFilter<HubLoggingFilter>());
+        services.Configure<HubOptions>(options =>
+        {
+            options.AddFilter<HubExceptionFilter>();
+            options.AddFilter<HubLoggingFilter>();
+        });
         var section = configuration.GetSection(RedisBackplaneOptions.SectionName);
         if (!section.Exists())
         {

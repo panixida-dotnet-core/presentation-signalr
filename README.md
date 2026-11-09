@@ -209,6 +209,11 @@ failures. The helpers do not catch unrelated exceptions or change cancellation,
 authorization, connection lifecycle callbacks, or outgoing notification
 contracts. They are not invoked automatically by a filter.
 
+`AddSignalR(configuration)` also installs a hub filter that unwraps a
+`TargetInvocationException` containing `HubException`, as produced by synchronous
+Native AOT reflection dispatch. The original HubException and its stack trace are
+preserved; other exceptions propagate unchanged.
+
 ## JSON contracts
 
 `AddSignalR(configuration)` configures `JsonHubProtocolOptions.PayloadSerializerOptions`
