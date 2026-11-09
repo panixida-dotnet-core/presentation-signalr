@@ -1,6 +1,7 @@
 using System.Reflection;
 
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Net.Http.Headers;
 
 using PANiXiDA.Core.Presentation.SignalR.Hubs;
 
@@ -9,6 +10,8 @@ namespace PANiXiDA.Core.Presentation.SignalR.DependencyInjection;
 /// <summary>Configures SignalR middleware for a web application.</summary>
 public static class WebApplicationExtensions
 {
+    private const string AccessTokenQueryParameter = "access_token";
+
     /// <summary>Maps source-generated hub registrations from the specified assemblies and enables query token forwarding on their transport paths.</summary>
     /// <param name="app">The web application.</param>
     /// <param name="assemblies">The hub assemblies referencing this package and its source generator. Duplicate assemblies are ignored.</param>
@@ -56,8 +59,8 @@ public static class WebApplicationExtensions
         {
             var request = context.Request;
             if (paths.Contains(request.Path.ToString().TrimEnd('/'))
-                && !request.Headers.ContainsKey("Authorization")
-                && request.Query.TryGetValue("access_token", out var token)
+                && !request.Headers.ContainsKey(HeaderNames.Authorization)
+                && request.Query.TryGetValue(AccessTokenQueryParameter, out var token)
                 && token.Count == 1 && !string.IsNullOrWhiteSpace(token[0])
                 && !token[0]!.Any(char.IsControl))
             {
