@@ -23,7 +23,7 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        var builder = services.AddSignalR();
+        var builder = services.AddSignalR().AddJsonConfiguration();
         services.AddSingleton<HubLoggingFilter>();
         services.Configure<HubOptions>(options => options.AddFilter<HubLoggingFilter>());
         var section = configuration.GetSection(RedisBackplaneOptions.SectionName);

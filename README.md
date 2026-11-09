@@ -16,11 +16,12 @@ and browser access token forwarding for .NET 10.
 Register the package once in the host's composition root. Applications own hubs,
 client contracts, authorization policies, group names, business subscriptions,
 and message delivery semantics. There is no dependency on the HTTP presentation,
-Application, Mediator, or Result packages.
+Application or Mediator packages. Result mapping uses `PANiXiDA.Core.ResultPattern`.
 
 ## Features
 
 - Standard SignalR services and builder for additional configuration.
+- Structured ResultPattern responses and strict JSON payload contracts.
 - Optional Redis backplane using a named connection string and a literal channel prefix.
 - Startup validation of Redis configuration without printing credentials.
 - Query token forwarding restricted to explicitly registered hub transport paths.
@@ -170,6 +171,88 @@ app.UseSignalR(hubs =>
 Generated and explicit registrations use generic hub types and preserve the members
 required by SignalR trimming analysis; it does not scan assemblies at runtime.
 Application-specific publishers and subscriptions remain in the application.
+
+## Result mapping
+
+Map application results explicitly with `ToSignalRResult()`. Use the existing
+ResultPattern `Map` extension first when the presentation response differs from
+the application value:
+
+```csharp
+using PANiXiDA.Core.Presentation.SignalR.Helpers;
+using PANiXiDA.Core.Presentation.SignalR.Results;
+using PANiXiDA.Core.ResultPattern;
+using Microsoft.AspNetCore.SignalR;
+
+public sealed class ResultsHub : Hub
+{
+    public SignalRResult Complete() => Result.Success().ToSignalRResult();
+    public SignalRResult<int> GetCount() => Result.Success(0).ToSignalRResult();
+}
+```
+
+The non-generic response contains `isSuccess` and `errors`; the generic response
+also contains `value`. Successful responses have no errors. All failure errors
+retain their order and expose only `type`, `message`, and `field`. Validation
+errors use the field metadata or `general`; other categories use a null field.
+Unexpected and unknown categories become `Unexpected` with the safe message
+`An unexpected error occurred.` Arbitrary error metadata is not serialized.
+
+Read `value` only when `isSuccess` is true. On failure it is `default(TValue)`:
+null for reference/nullable value types, zero for `int`, and false for `bool`.
+Successful zero, false, and nullable null values are preserved. Mapping does not
+read the throwing `Value` property of a failed application result.
+
+Expected business failures are normal structured return values. Mapping does not
+catch exceptions or change `HubException`, cancellation, authorization, or
+connection lifecycle behavior. It does not serialize errors as exception messages
+or convert hub results automatically in a filter.
+
+## JSON contracts
+
+`AddSignalR(configuration)` configures `JsonHubProtocolOptions.PayloadSerializerOptions`
+with the same defaults as the HTTP presentation package:
+
+- `NumberHandling = JsonNumberHandling.Strict`;
+- `RespectRequiredConstructorParameters = true`;
+- `RespectNullableAnnotations = true`.
+
+These settings apply to JSON hub arguments and return values, independently of
+HTTP JSON options. Previously accepted quoted numbers, missing non-optional
+constructor parameters (including nullable ones), and null non-nullable members
+are rejected. An explicit null is valid for a nullable member. Optional constructor
+parameters can be omitted. Collection elements, generic-member nullability, and
+business validation remain application responsibilities.
+
+The host can further configure the standard `AddJsonProtocol` callback. Its
+resolver chain, converters, naming policy, and other settings are preserved.
+MessagePack and other protocols are not changed.
+
+For Native AOT, register source-generated metadata for every closed response type
+and application payload. For example:
+
+```csharp
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using PANiXiDA.Core.Presentation.SignalR.Results;
+
+[JsonSourceGenerationOptions(JsonSerializerDefaults.Web,
+    GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSerializable(typeof(SignalRResult))]
+[JsonSerializable(typeof(SignalRResult<int>))]
+internal partial class HubJsonContext : JsonSerializerContext;
+```
+
+```csharp
+builder.Services.AddSignalR(builder.Configuration)
+    .AddJsonProtocol(options =>
+        options.PayloadSerializerOptions.TypeInfoResolverChain.Insert(0, HubJsonContext.Default));
+```
+
+Add closed types such as `SignalRResult<MyResponse>` and request DTOs to that
+context when the application uses them. Configure .NET clients with their own
+source-generated context as needed. The mapper uses no reflection, dynamic
+generic construction, or custom serializer converter.
 
 ## Logging
 
