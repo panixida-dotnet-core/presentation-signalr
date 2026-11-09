@@ -304,6 +304,8 @@ top-level payload types; shapes for their members are generated transitively.
 Unknown contracts fail instead of falling back to reflection. DTOs do not require
 MessagePack attributes or changes to hub method signatures. JSON clients continue
 to use the JSON configuration and, for AOT, their `JsonSerializerContext`.
+Redis backplane publishers serialize notifications for all enabled hub protocols;
+register MessagePack shapes for their DTOs even when current receivers use JSON.
 
 The overload also accepts an optional `Nerdbank.MessagePack.MessagePackSerializer`
 for application-specific serialization settings. Such settings and matching
