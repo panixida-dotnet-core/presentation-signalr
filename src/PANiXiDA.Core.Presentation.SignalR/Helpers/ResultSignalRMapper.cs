@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+
 using PANiXiDA.Core.Presentation.SignalR.Results;
 using PANiXiDA.Core.ResultPattern;
 
@@ -27,7 +29,7 @@ public static class ResultSignalRMapper
         return new SignalRResult<TValue>(result.IsSuccess, result.ValueOrDefault, MapErrors(result.Errors));
     }
 
-    private static IReadOnlyList<SignalRError> MapErrors(IReadOnlyList<Error> errors)
+    private static ReadOnlyCollection<SignalRError> MapErrors(IReadOnlyList<Error> errors)
     {
         return Array.AsReadOnly(errors.Select(MapError).ToArray());
     }
