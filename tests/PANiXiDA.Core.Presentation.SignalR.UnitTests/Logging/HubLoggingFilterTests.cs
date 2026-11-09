@@ -191,7 +191,11 @@ public sealed class HubLoggingFilterTests
             return payload;
         }
 
-        public void Fail() => throw new InvalidOperationException("Expected hub failure");
+        public void Fail()
+        {
+            Context.ConnectionAborted.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("Expected hub failure");
+        }
     }
 
     private sealed class TestCallerContext(bool aborted = false, string? userId = "user-1") : HubCallerContext
