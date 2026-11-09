@@ -18,11 +18,13 @@ namespace PANiXiDA.Core.Presentation.SignalR.UnitTests.Hosting;
 
 public sealed class ResultContractHostingTests
 {
-    [Fact(DisplayName = "Kestrel hub calls return plain values and void completions using only source-generated JSON metadata")]
-    public async Task Hosting_ShouldReturnPlainValues()
+    [Theory(DisplayName = "Kestrel hub calls return plain values and void completions over JSON and MessagePack")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Hosting_ShouldReturnPlainValues(bool messagePack)
     {
         await using var app = await CreateApplicationAsync();
-        await using var connection = CreateConnection(app);
+        await using var connection = CreateConnection(app, messagePack);
         var cancellationToken = TestContext.Current.CancellationToken;
 
         await connection.StartAsync(cancellationToken);
@@ -36,11 +38,13 @@ public sealed class ResultContractHostingTests
         nullable.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Kestrel failures use standard client HubExceptions and keep the connection usable")]
-    public async Task Hosting_ShouldUseStandardHubErrors()
+    [Theory(DisplayName = "JSON and MessagePack failures use standard client HubExceptions and keep the connection usable")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Hosting_ShouldUseStandardHubErrors(bool messagePack)
     {
         await using var app = await CreateApplicationAsync();
-        await using var connection = CreateConnection(app);
+        await using var connection = CreateConnection(app, messagePack);
         var cancellationToken = TestContext.Current.CancellationToken;
         await connection.StartAsync(cancellationToken);
 
@@ -112,7 +116,7 @@ public sealed class ResultContractHostingTests
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton<InvocationCounter>();
-        builder.Services.AddSignalR(new ConfigurationBuilder().Build())
+        builder.Services.AddSignalR(new ConfigurationBuilder().Build(), ContractMessagePackTypes.GeneratedTypeShapeProvider)
             .AddJsonProtocol(options => UseGeneratedJson(options.PayloadSerializerOptions));
         var app = builder.Build();
         app.UseSignalR(hubs => hubs.MapHub<ContractHub>("/contracts"));
@@ -120,18 +124,98 @@ public sealed class ResultContractHostingTests
         return app;
     }
 
-    private static HubConnection CreateConnection(WebApplication app)
+    private static HubConnection CreateConnection(WebApplication app, bool messagePack = false)
     {
-        return new HubConnectionBuilder().WithUrl($"{app.Urls.Single()}/contracts", options =>
+        var builder = new HubConnectionBuilder().WithUrl($"{app.Urls.Single()}/contracts", options =>
         {
             options.Transports = HttpTransportType.WebSockets;
             options.SkipNegotiation = true;
             options.WebSocketConfiguration = socket => socket.Proxy = null;
-        }).AddJsonProtocol(options => UseGeneratedJson(options.PayloadSerializerOptions)).Build();
+        });
+        if (messagePack)
+        {
+            builder.AddMessagePackProtocol();
+        }
+        else
+        {
+            builder.AddJsonProtocol(options => UseGeneratedJson(options.PayloadSerializerOptions));
+        }
+        return builder.Build();
+    }
+
+    [Fact(DisplayName = "A single Kestrel hub accepts Microsoft JSON and MessagePack clients concurrently")]
+    public async Task Hosting_ShouldSupportBothProtocols()
+    {
+        await using var app = await CreateApplicationAsync();
+        await using var json = CreateConnection(app);
+        await using var messagePack = CreateConnection(app, true);
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var request = new ContractRequest("Melee", 0, null);
+        var notification = new TaskCompletionSource<ContractResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var subscription = messagePack.On<ContractResponse>("Updated", response => notification.TrySetResult(response));
+        await json.StartAsync(cancellationToken);
+        await messagePack.StartAsync(cancellationToken);
+
+        (await json.InvokeAsync<ContractResponse>("Submit", request, cancellationToken)).Name.ShouldBe("Melee");
+        (await messagePack.InvokeAsync<ContractResponse>("Submit", request, cancellationToken)).Name.ShouldBe("Melee");
+        await messagePack.InvokeAsync("Publish", request, cancellationToken);
+
+        (await notification.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken)).Name.ShouldBe("Melee");
+        app.Services.GetRequiredService<InvocationCounter>().Calls.ShouldBe(2);
+    }
+
+    [Theory(DisplayName = "Microsoft MessagePack clients round-trip GUIDs, decimal boundaries and date offsets without changing values")]
+    [InlineData("79228162514264337593543950335", 330)]
+    [InlineData("-79228162514264337593543950335", -330)]
+    [InlineData("0.0000000000000000000000000001", 0)]
+    public async Task Hosting_ShouldPreserveMessagePackScalars(string amount, int offsetMinutes)
+    {
+        await using var app = await CreateApplicationAsync();
+        await using var connection = CreateConnection(app, true);
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var request = new ScalarContract(Guid.NewGuid(), decimal.Parse(amount, System.Globalization.CultureInfo.InvariantCulture),
+            new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.FromMinutes(offsetMinutes)));
+        await connection.StartAsync(cancellationToken);
+
+        var response = await connection.InvokeAsync<ScalarContract>("EchoScalars", request, cancellationToken);
+
+        response.Id.ShouldBe(request.Id);
+        response.Amount.ShouldBe(request.Amount);
+        response.Timestamp.Ticks.ShouldBe(request.Timestamp.Ticks);
+        response.Timestamp.Offset.ShouldBe(request.Timestamp.Offset);
+    }
+
+    [Fact(DisplayName = "Malformed MessagePack date offsets fail without closing the connection")]
+    public async Task Hosting_ShouldRejectInvalidDateOffset()
+    {
+        await using var app = await CreateApplicationAsync();
+        await using var connection = CreateConnection(app, true);
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await connection.StartAsync(cancellationToken);
+
+        await Should.ThrowAsync<HubException>(() => connection.InvokeAsync<DateTimeOffset>("EchoOffset", new[] { 0 }, cancellationToken));
+
+        var value = DateTimeOffset.UtcNow;
+        (await connection.InvokeAsync<DateTimeOffset>("EchoOffset", value, cancellationToken)).ShouldBe(value);
+        connection.State.ShouldBe(HubConnectionState.Connected);
     }
 
     public sealed class ContractHub(InvocationCounter counter) : Hub
     {
+        public Task Publish(ContractRequest request) => Clients.Caller.SendAsync("Updated", new ContractResponse(request.Name));
+
+        public ScalarContract EchoScalars(ScalarContract request)
+        {
+            Context.ConnectionAborted.ThrowIfCancellationRequested();
+            return request;
+        }
+
+        public DateTimeOffset EchoOffset(DateTimeOffset value)
+        {
+            Context.ConnectionAborted.ThrowIfCancellationRequested();
+            return value;
+        }
+
         public void Complete(bool fail)
         {
             Context.ConnectionAborted.ThrowIfCancellationRequested();
@@ -185,6 +269,7 @@ public sealed class ResultContractHostingTests
 
 public sealed record ContractRequest(string Name, int Count, string? RequiredNote, string Description = "optional");
 public sealed record ContractResponse(string Name);
+public sealed record ScalarContract(Guid Id, decimal Amount, DateTimeOffset Timestamp);
 
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web, GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(int))]

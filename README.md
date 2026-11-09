@@ -22,6 +22,7 @@ Application or Mediator packages. Result mapping uses `PANiXiDA.Core.ResultPatte
 
 - Standard SignalR services and builder for additional configuration.
 - ResultPattern helpers using standard HubException errors and strict JSON payload contracts.
+- JSON and MessagePack protocols with source-generated payload contracts for Native AOT.
 - Optional Redis backplane using a named connection string and a literal channel prefix.
 - Startup validation of Redis configuration without printing credentials.
 - Query token forwarding restricted to explicitly registered hub transport paths.
@@ -232,7 +233,7 @@ business validation remain application responsibilities.
 
 The host can further configure the standard `AddJsonProtocol` callback. Its
 resolver chain, converters, naming policy, and other settings are preserved.
-MessagePack and other protocols are not changed.
+These settings do not apply to MessagePack payloads.
 
 For Native AOT, register source-generated metadata for the actual method argument
 and return types. For example:
@@ -262,6 +263,53 @@ Add application request/response DTOs and other RPC argument/return types to tha
 context when the application uses them. Configure .NET clients with their own
 source-generated context as needed. The helpers use no reflection, dynamic
 generic construction, or custom serializer converter.
+
+## MessagePack contracts
+
+`AddSignalR(configuration)` enables both JSON and binary MessagePack. The client
+chooses one protocol during the SignalR handshake; registration does not force
+existing JSON clients to switch or add automatic protocol fallback.
+
+MessagePack uses `Nerdbank.MessagePack.SignalR` because its implementation supports
+Native AOT without runtime code generation. It implements the standard SignalR
+MessagePack wire protocol and is tested with Microsoft's MessagePack client.
+Enums are serialized by name, GUIDs use the `D` string format, decimals use
+invariant strings, and date offsets preserve their wall-clock timestamp and
+offset. These defaults match Microsoft's SignalR MessagePack client formats.
+DTOs use maps keyed by CLR member names. JSON naming settings do not affect them;
+custom indexed/key-based contracts must be configured consistently on both ends.
+
+The existing registration overload supplies generated shapes for `bool`, numeric
+primitives, `decimal`, `char`, `string`, `Guid`, `DateTime`, `DateTimeOffset`,
+`TimeSpan`, and `byte[]`. For application DTOs, enums, collections, and other
+payloads, pass a source-generated provider covering every argument, result,
+stream item, and outgoing notification payload type:
+
+```csharp
+using PolyType;
+using PANiXiDA.Core.Presentation.SignalR.DependencyInjection;
+
+builder.Services.AddSignalR(builder.Configuration,
+    HubMessagePackTypes.GeneratedTypeShapeProvider);
+
+[GenerateShapeFor<int>]
+[GenerateShapeFor<bool>]
+[GenerateShapeFor<string>]
+[GenerateShapeFor<CountResponse>]
+internal partial class HubMessagePackTypes;
+```
+
+The application provider replaces the built-in scalar provider. Include all used
+top-level payload types; shapes for their members are generated transitively.
+Unknown contracts fail instead of falling back to reflection. DTOs do not require
+MessagePack attributes or changes to hub method signatures. JSON clients continue
+to use the JSON configuration and, for AOT, their `JsonSerializerContext`.
+
+The overload also accepts an optional `Nerdbank.MessagePack.MessagePackSerializer`
+for application-specific serialization settings. Such settings and matching
+client contracts remain the host's responsibility. JSON's strict constructor and
+nullable checks are independent of MessagePack; business validation belongs in
+the application for both protocols.
 
 ## Logging
 
@@ -341,9 +389,10 @@ generated code. These settings do not enable Native AOT publishing in consuming
 applications; the host controls `PublishAot` and must validate its own dependencies
 and hub implementations.
 
-For Native AOT hosts, use the JSON protocol with a source-generated
-`JsonSerializerContext` covering every hub payload type. Register that context in
-`JsonHubProtocolOptions.PayloadSerializerOptions.TypeInfoResolverChain`. Use
+For Native AOT hosts, use source-generated contracts for each enabled protocol:
+register a `JsonSerializerContext` in
+`JsonHubProtocolOptions.PayloadSerializerOptions.TypeInfoResolverChain` for JSON
+and pass a generated type shape provider for MessagePack as shown above. Use
 ordinary `Hub` and `IHubContext<THub>`: strongly typed `Hub<TClient>` and
 `IHubContext<THub, TClient>` require runtime proxy generation and are not supported
 by Native AOT. They remain available for normal JIT deployments.
@@ -396,8 +445,10 @@ package source, shared build settings, README and icon.
 
 The NuGet package includes the `net10.0` library, its `netstandard2.0` source
 generator under `analyzers/dotnet/cs`, XML documentation, README,
-license metadata, icon and repository metadata. Redis integration is a runtime
-package dependency; SignalR Client and Testcontainers are test-only.
+license metadata, icon and repository metadata. Redis integration,
+`PANiXiDA.Core.ResultPattern`, and `Nerdbank.MessagePack.SignalR` are runtime
+package dependencies. PolyType supplies the MessagePack type shape generator;
+Microsoft's SignalR Client, MessagePack protocol, and Testcontainers are test-only.
 A symbols package is produced by the repository's packaging settings.
 
 ## License
