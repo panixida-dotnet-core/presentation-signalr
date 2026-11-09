@@ -171,6 +171,30 @@ Generated and explicit registrations use generic hub types and preserve the memb
 required by SignalR trimming analysis; it does not scan assemblies at runtime.
 Application-specific publishers and subscriptions remain in the application.
 
+## Logging
+
+`AddSignalR(configuration)` installs a global `IHubFilter` for client-invoked hub
+methods and the `OnConnectedAsync` / `OnDisconnectedAsync` callbacks. Logs written
+inside these operations inherit snapshot scopes with `rpc.system`, `rpc.service`,
+`rpc.method`, `signalr.connection.id`, and `enduser.id`. The user ID is SignalR's
+`UserIdentifier`, including a host-provided `IUserIdProvider`; it may be null.
+
+Each operation writes one `Information` event, `SignalR operation finished`, with
+`signalr.operation.duration_ms` and `signalr.operation.outcome` (`succeeded`,
+`failed`, or `cancelled`). Cancellation is classified as `cancelled` only when
+the connection cancellation token is signalled. A disconnect with a transport
+exception is reported as `failed`. Exceptions propagate unchanged, and their
+details remain owned by the standard SignalR logger to avoid duplicate error
+logs. Normal logging filters apply to
+`PANiXiDA.Core.Presentation.SignalR.Logging.HubLoggingFilter`.
+
+The filter does not log arguments, return values, tokens, or notification payloads.
+Outgoing notifications through `IHubContext` are not intercepted. For streaming
+methods the duration measures the method invocation, not subsequent stream
+enumeration. The filter does not create activities; OpenTelemetry can collect
+SignalR's built-in activities independently. HTTP request and proxy logs still
+need their own query token redaction.
+
 ## Configuration
 
 Enable Redis with the `SignalR:Redis` section:
