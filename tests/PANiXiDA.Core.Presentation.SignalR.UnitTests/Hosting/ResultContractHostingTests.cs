@@ -193,7 +193,7 @@ public sealed class ResultContractHostingTests
         var cancellationToken = TestContext.Current.CancellationToken;
         await connection.StartAsync(cancellationToken);
 
-        await Should.ThrowAsync<HubException>(() => connection.InvokeAsync<DateTimeOffset>("EchoOffset", new[] { 0 }, cancellationToken));
+        await Should.ThrowAsync<HubException>(() => connection.InvokeAsync<DateTimeOffset>("EchoOffset", Array.Empty<int>(), cancellationToken));
 
         var value = DateTimeOffset.UtcNow;
         (await connection.InvokeAsync<DateTimeOffset>("EchoOffset", value, cancellationToken)).ShouldBe(value);
