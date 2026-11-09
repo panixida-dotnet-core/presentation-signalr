@@ -175,15 +175,12 @@ Application-specific publishers and subscriptions remain in the application.
 
 ## Result mapping
 
-Handle application results explicitly with `ThrowIfFailure()` or `GetValueOrThrow()`.
-Use the existing
-ResultPattern `Map` extension first when the presentation response differs from
-the application value:
+Call the helpers explicitly in hub methods:
 
 ```csharp
+using Microsoft.AspNetCore.SignalR;
 using PANiXiDA.Core.Presentation.SignalR.Helpers;
 using PANiXiDA.Core.ResultPattern;
-using Microsoft.AspNetCore.SignalR;
 
 public sealed class ResultsHub : Hub
 {
@@ -192,133 +189,70 @@ public sealed class ResultsHub : Hub
 }
 ```
 
-On success, `ThrowIfFailure()` returns normally and `GetValueOrThrow()` returns
-the original value, including zero, false, and an allowed null. The hub returns
-an ordinary value/DTO or completes without a value. No response envelope or
-client-side Result model is required.
+Success returns an ordinary value/DTO or no value. Failure maps only the first
+error to `HubException`: expected errors use its message; unexpected/unknown use
+`An unexpected error occurred.` Additional errors and metadata are not sent.
+Use ResultPattern `Map` first when converting an application value to a response.
 
-On failure, both helpers throw the standard `HubException` before reading a
-failed result's `Value`. The first error supplies the message for Validation,
-NotFound, Conflict, Unauthorized, Forbidden, or Failure. Unexpected and unknown
-categories use `An unexpected error occurred.` Additional errors, field metadata,
-arbitrary metadata, and internal exception details are not transmitted.
-
-Clients use the standard `invoke` / `InvokeAsync` error path: .NET clients receive
-`HubException`; JavaScript clients receive a rejected promise with an `Error`.
-There are no structured error categories or HTTP status codes for these RPC
-failures. The helpers do not catch unrelated exceptions or change cancellation,
-authorization, connection lifecycle callbacks, or outgoing notification
-contracts. They are not invoked automatically by a filter.
-
-`AddSignalR(configuration)` also installs a hub filter that unwraps a
-`TargetInvocationException` containing `HubException`, as produced by synchronous
-Native AOT reflection dispatch. The original HubException and its stack trace are
-preserved; other exceptions propagate unchanged.
-
-`AddSignalR(configuration)` enables `HubOptions.EnableDetailedErrors` only when
-the registered `IHostEnvironment` is Development. Production, Staging, custom
-environments, and service collections without a host environment keep it disabled.
-This applies to JSON and MessagePack. Technical exception messages can reach
-Development clients; expected `HubException` messages remain available in every
-environment. The host can override the default with a later `Configure<HubOptions>`.
+`EnableDetailedErrors` defaults to true only in Development, based on
+`IHostEnvironment`; without an environment it is false. A later
+`Configure<HubOptions>` can override it. Expected HubException messages reach
+clients in every environment.
 
 ## JSON contracts
 
-`AddSignalR(configuration)` configures `JsonHubProtocolOptions.PayloadSerializerOptions`
-with the same defaults as the HTTP presentation package:
+JSON uses `NumberHandling.Strict`, `RespectRequiredConstructorParameters = true`,
+and `RespectNullableAnnotations = true`, independently of HTTP and MessagePack.
+Missing constructor arguments without defaults (including nullable ones) and
+explicit nulls for non-nullable members are rejected. Invalid non-nullable output
+also fails serialization. Collection-element and generic nullability are not checked.
 
-- `NumberHandling = JsonNumberHandling.Strict`;
-- `RespectRequiredConstructorParameters = true`;
-- `RespectNullableAnnotations = true`.
+Customize JSON through `AddJsonProtocol`; existing resolvers and converters are
+preserved. Native AOT requires a `JsonSerializerContext` covering all payload
+types, as in the combined example below.
 
-These settings apply to JSON hub arguments and return values, independently of
-HTTP JSON options. Previously accepted quoted numbers, missing non-optional
-constructor parameters (including nullable ones), and null non-nullable members
-are rejected. An explicit null is valid for a nullable member. Optional constructor
-parameters can be omitted. Collection elements, generic-member nullability, and
-business validation remain application responsibilities.
+## MessagePack contracts
 
-The host can further configure the standard `AddJsonProtocol` callback. Its
-resolver chain, converters, naming policy, and other settings are preserved.
-These settings do not apply to MessagePack payloads.
+Both protocols are enabled; the client selects one at handshake, without automatic
+fallback. MessagePack uses the AOT-compatible `Nerdbank.MessagePack.SignalR` and is
+tested with Microsoft's client. Defaults use CLR member names, enum names, GUID
+strings (`D`), invariant decimal strings, and preserved DateTimeOffset offsets.
+Custom contracts and serializer settings must match the client.
 
-For Native AOT, register source-generated metadata for the actual method argument
-and return types. For example:
+The default registration supplies common scalar shapes. For DTOs, enums,
+collections, stream items, and notifications, pass a generated provider containing
+all top-level payload types. It replaces the built-in provider; member shapes are
+generated transitively. Example configuring both protocols for Native AOT:
 
 ```csharp
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.DependencyInjection;
+using PANiXiDA.Core.Presentation.SignalR.DependencyInjection;
+using PolyType;
+
+builder.Services.AddSignalR(builder.Configuration,
+        HubMessagePackTypes.GeneratedTypeShapeProvider)
+    .AddJsonProtocol(options =>
+        options.PayloadSerializerOptions.TypeInfoResolverChain.Insert(0, HubJsonContext.Default));
+
+public sealed record CountResponse(int Count);
 
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web,
     GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(int))]
-[JsonSerializable(typeof(bool))]
-[JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(CountResponse))]
 internal partial class HubJsonContext : JsonSerializerContext;
 
-public sealed record CountResponse(int Count);
-```
-
-```csharp
-builder.Services.AddSignalR(builder.Configuration)
-    .AddJsonProtocol(options =>
-        options.PayloadSerializerOptions.TypeInfoResolverChain.Insert(0, HubJsonContext.Default));
-```
-
-Add application request/response DTOs and other RPC argument/return types to that
-context when the application uses them. Configure .NET clients with their own
-source-generated context as needed. The helpers use no reflection, dynamic
-generic construction, or custom serializer converter.
-
-## MessagePack contracts
-
-`AddSignalR(configuration)` enables both JSON and binary MessagePack. The client
-chooses one protocol during the SignalR handshake; registration does not force
-existing JSON clients to switch or add automatic protocol fallback.
-
-MessagePack uses `Nerdbank.MessagePack.SignalR` because its implementation supports
-Native AOT without runtime code generation. It implements the standard SignalR
-MessagePack wire protocol and is tested with Microsoft's MessagePack client.
-Enums are serialized by name, GUIDs use the `D` string format, decimals use
-invariant strings, and date offsets preserve their wall-clock timestamp and
-offset. These defaults match Microsoft's SignalR MessagePack client formats.
-DTOs use maps keyed by CLR member names. JSON naming settings do not affect them;
-custom indexed/key-based contracts must be configured consistently on both ends.
-
-The existing registration overload supplies generated shapes for `bool`, numeric
-primitives, `decimal`, `char`, `string`, `Guid`, `DateTime`, `DateTimeOffset`,
-`TimeSpan`, and `byte[]`. For application DTOs, enums, collections, and other
-payloads, pass a source-generated provider covering every argument, result,
-stream item, and outgoing notification payload type:
-
-```csharp
-using PolyType;
-using PANiXiDA.Core.Presentation.SignalR.DependencyInjection;
-
-builder.Services.AddSignalR(builder.Configuration,
-    HubMessagePackTypes.GeneratedTypeShapeProvider);
-
 [GenerateShapeFor<int>]
-[GenerateShapeFor<bool>]
-[GenerateShapeFor<string>]
 [GenerateShapeFor<CountResponse>]
 internal partial class HubMessagePackTypes;
 ```
 
-The application provider replaces the built-in scalar provider. Include all used
-top-level payload types; shapes for their members are generated transitively.
-Unknown contracts fail instead of falling back to reflection. DTOs do not require
-MessagePack attributes or changes to hub method signatures. JSON clients continue
-to use the JSON configuration and, for AOT, their `JsonSerializerContext`.
-Redis backplane publishers serialize notifications for all enabled hub protocols;
-register MessagePack shapes for their DTOs even when current receivers use JSON.
-
-The overload also accepts an optional `Nerdbank.MessagePack.MessagePackSerializer`
-for application-specific serialization settings. Such settings and matching
-client contracts remain the host's responsibility. JSON's strict constructor and
-nullable checks are independent of MessagePack; business validation belongs in
-the application for both protocols.
+Unknown MessagePack contracts fail without reflection fallback. Redis publishers
+need shapes for every notification DTO even with JSON-only receivers, because the
+backplane serializes all enabled protocols. The registration overload also accepts
+an optional `Nerdbank.MessagePack.MessagePackSerializer` for host customization.
 
 ## Logging
 
