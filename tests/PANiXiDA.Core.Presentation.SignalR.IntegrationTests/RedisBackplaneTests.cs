@@ -21,7 +21,7 @@ public sealed class RedisBackplaneTests(RedisFixture redis) : IClassFixture<Redi
         await using var first = await CreateApplicationAsync(prefix);
         await using var second = await CreateApplicationAsync(prefix);
         await using var firstConnection = CreateConnection(first);
-        await using var secondConnection = CreateConnection(first);
+        await using var secondConnection = CreateConnection(first, true);
         var firstMessages = Channel.CreateUnbounded<string>();
         var secondMessages = Channel.CreateUnbounded<string>();
         firstConnection.On<string>("Received", message => firstMessages.Writer.TryWrite(message));
@@ -65,7 +65,31 @@ public sealed class RedisBackplaneTests(RedisFixture redis) : IClassFixture<Redi
             .AsTask().WaitAsync(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken));
     }
 
-    private async Task<WebApplication> CreateApplicationAsync(string prefix)
+    [Fact(DisplayName = "Redis delivers source-generated DTOs across hosts to JSON and Microsoft MessagePack clients")]
+    public async Task Redis_ShouldDeliverDtoAcrossProtocols()
+    {
+        var prefix = $"signalr-tests:{Guid.NewGuid():N}";
+        await using var first = await CreateApplicationAsync(prefix, true);
+        await using var second = await CreateApplicationAsync(prefix, true);
+        await using var json = CreateConnection(first);
+        await using var messagePack = CreateConnection(first, true);
+        var jsonMessage = new TaskCompletionSource<Snapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var binaryMessage = new TaskCompletionSource<Snapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var jsonSubscription = json.On<Snapshot>("Changed", value => jsonMessage.TrySetResult(value));
+        using var binarySubscription = messagePack.On<Snapshot>("Changed", value => binaryMessage.TrySetResult(value));
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await json.StartAsync(cancellationToken);
+        await messagePack.StartAsync(cancellationToken);
+        var expected = new Snapshot(Guid.NewGuid(), 123.45m);
+        var publisher = second.Services.GetRequiredService<IHubContext<StreamingHub>>();
+
+        await publisher.Clients.All.SendAsync("Changed", expected, cancellationToken);
+
+        (await jsonMessage.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken)).ShouldBe(expected);
+        (await binaryMessage.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken)).ShouldBe(expected);
+    }
+
+    private async Task<WebApplication> CreateApplicationAsync(string prefix, bool applicationContracts = false)
     {
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
@@ -75,16 +99,25 @@ public sealed class RedisBackplaneTests(RedisFixture redis) : IClassFixture<Redi
             ["ConnectionStrings:Redis"] = redis.ConnectionString,
             ["SignalR:Redis:ChannelPrefix"] = prefix
         });
-        builder.Services.AddSignalR(builder.Configuration);
+        if (applicationContracts)
+        {
+            builder.Services.AddSignalR(builder.Configuration, RedisMessagePackTypes.GeneratedTypeShapeProvider);
+        }
+        else
+        {
+            builder.Services.AddSignalR(builder.Configuration);
+        }
         var app = builder.Build();
         app.UseSignalR(hubs => hubs.MapHub<StreamingHub>("/hubs/events"));
         await app.StartAsync(TestContext.Current.CancellationToken);
         return app;
     }
 
-    private static HubConnection CreateConnection(WebApplication app)
+    private static HubConnection CreateConnection(WebApplication app, bool messagePack = false)
     {
-        return new HubConnectionBuilder().WithUrl($"{app.Urls.Single()}/hubs/events").Build();
+        var builder = new HubConnectionBuilder().WithUrl($"{app.Urls.Single()}/hubs/events");
+        if (messagePack) { builder.AddMessagePackProtocol(); }
+        return builder.Build();
     }
 
     private static async Task<string> ReadMessageAsync(Channel<string> messages)
@@ -103,3 +136,5 @@ public sealed class RedisBackplaneTests(RedisFixture redis) : IClassFixture<Redi
         public Task Join(string group) => Groups.AddToGroupAsync(Context.ConnectionId, group, Context.ConnectionAborted);
     }
 }
+
+public sealed record Snapshot(Guid Id, decimal Amount);
