@@ -198,6 +198,29 @@ public sealed class HubRegistrationGeneratorTests
         Should.Throw<ArgumentException>(() => HubRegistry.RegisterAssembly(typeof(SignalRHostingTests).Assembly, _ => { }));
     }
 
+    [Fact(DisplayName = "Null mapping callbacks are rejected without preventing a subsequent valid registration")]
+    public void RegisterAssembly_ShouldRejectNullCallbackWithoutRegisteringAssembly()
+    {
+        var (_, compilation) = Compile("public class Unrelated { }", includeRuntime: false);
+        var context = new AssemblyLoadContext("registration-" + Guid.NewGuid(), isCollectible: true);
+        try
+        {
+            var assembly = Load(compilation, context);
+            using var app = CreateApplication();
+
+            var exception = Should.Throw<ArgumentNullException>(() => HubRegistry.RegisterAssembly(assembly, null!));
+
+            exception.ParamName.ShouldBe("mapHubs");
+            HubRegistry.RegisterAssembly(assembly, hubs => hubs.MapHub<SignalRHostingTests.OtherHub>("/registered"));
+            app.UseSignalR(assembly);
+            HubEndpoints(app).ShouldHaveSingleItem().RoutePattern.RawText.ShouldBe("/registered");
+        }
+        finally
+        {
+            context.Unload();
+        }
+    }
+
     private static WebApplication CreateApplication()
     {
         var builder = WebApplication.CreateSlimBuilder();

@@ -15,9 +15,11 @@ public static class HubRegistry
     /// <summary>Registers the statically generated mapping callback for an assembly.</summary>
     /// <param name="assembly">The assembly containing the generated registration.</param>
     /// <param name="mapHubs">The callback mapping its hubs in deterministic type-name order.</param>
+    /// <exception cref="ArgumentNullException">The assembly or mapping callback is null.</exception>
     /// <exception cref="ArgumentException">The assembly already has a registration.</exception>
     public static void RegisterAssembly(Assembly assembly, Action<HubMapBuilder> mapHubs)
     {
+        ArgumentNullException.ThrowIfNull(mapHubs);
         Registrations.Add(assembly, mapHubs);
     }
 
