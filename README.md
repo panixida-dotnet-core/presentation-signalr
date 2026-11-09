@@ -215,6 +215,13 @@ contracts. They are not invoked automatically by a filter.
 Native AOT reflection dispatch. The original HubException and its stack trace are
 preserved; other exceptions propagate unchanged.
 
+`AddSignalR(configuration)` enables `HubOptions.EnableDetailedErrors` only when
+the registered `IHostEnvironment` is Development. Production, Staging, custom
+environments, and service collections without a host environment keep it disabled.
+This applies to JSON and MessagePack. Technical exception messages can reach
+Development clients; expected `HubException` messages remain available in every
+environment. The host can override the default with a later `Configure<HubOptions>`.
+
 ## JSON contracts
 
 `AddSignalR(configuration)` configures `JsonHubProtocolOptions.PayloadSerializerOptions`

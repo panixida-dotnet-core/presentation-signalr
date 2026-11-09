@@ -110,9 +110,32 @@ public sealed class ResultContractHostingTests
         options.TypeInfoResolverChain.Add(ContractJsonContext.Default);
     }
 
-    private static async Task<WebApplication> CreateApplicationAsync()
+    [Theory(DisplayName = "Only Development clients receive technical exception messages over JSON and MessagePack")]
+    [InlineData("Development", false, true)]
+    [InlineData("Development", true, true)]
+    [InlineData("Production", false, false)]
+    [InlineData("Production", true, false)]
+    [InlineData("Staging", false, false)]
+    [InlineData("Staging", true, false)]
+    public async Task Hosting_ShouldLimitDetailedErrorsToDevelopment(string environmentName, bool messagePack, bool detailed)
     {
-        var builder = WebApplication.CreateSlimBuilder();
+        await using var app = await CreateApplicationAsync(environmentName);
+        await using var connection = CreateConnection(app, messagePack);
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await connection.StartAsync(cancellationToken);
+
+        var exception = await Should.ThrowAsync<HubException>(() => connection.InvokeAsync("Fault", cancellationToken));
+        var expected = await Should.ThrowAsync<HubException>(() => connection.InvokeAsync<int>("Number", true, 0, cancellationToken));
+
+        exception.Message.Contains("Internal diagnostic detail", StringComparison.Ordinal).ShouldBe(detailed);
+        exception.Message.Contains(nameof(InvalidOperationException), StringComparison.Ordinal).ShouldBe(detailed);
+        expected.Message.ShouldContain("Conflict");
+        (await connection.InvokeAsync<int>("Number", false, 42, cancellationToken)).ShouldBe(42);
+    }
+
+    private static async Task<WebApplication> CreateApplicationAsync(string environmentName = "Production")
+    {
+        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { EnvironmentName = environmentName });
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton<InvocationCounter>();
@@ -202,6 +225,12 @@ public sealed class ResultContractHostingTests
 
     public sealed class ContractHub(InvocationCounter counter) : Hub
     {
+        public Task Fault()
+        {
+            Context.ConnectionAborted.ThrowIfCancellationRequested();
+            return Task.FromException(new InvalidOperationException("Internal diagnostic detail"));
+        }
+
         public Task Publish(ContractRequest request) => Clients.Caller.SendAsync("Updated", new ContractResponse(request.Name));
 
         public ScalarContract EchoScalars(ScalarContract request)

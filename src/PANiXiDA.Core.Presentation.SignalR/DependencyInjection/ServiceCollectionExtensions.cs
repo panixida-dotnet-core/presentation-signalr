@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.StackExchangeRedis;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 using Nerdbank.MessagePack;
@@ -50,8 +51,9 @@ public static class ServiceCollectionExtensions
             .AddMessagePackConfiguration(messagePackTypes, messagePackSerializer);
         services.AddSingleton<HubExceptionFilter>();
         services.AddSingleton<HubLoggingFilter>();
-        services.Configure<HubOptions>(options =>
+        services.AddOptions<HubOptions>().Configure<IServiceProvider>((options, provider) =>
         {
+            options.EnableDetailedErrors = provider.GetService<IHostEnvironment>()?.IsDevelopment() == true;
             options.AddFilter<HubExceptionFilter>();
             options.AddFilter<HubLoggingFilter>();
         });
