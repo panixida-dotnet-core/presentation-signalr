@@ -12,43 +12,49 @@ using Microsoft.Extensions.Logging;
 
 using PANiXiDA.Core.Presentation.SignalR.DependencyInjection;
 using PANiXiDA.Core.Presentation.SignalR.Helpers;
-using PANiXiDA.Core.Presentation.SignalR.Results;
 using PANiXiDA.Core.ResultPattern;
 
 namespace PANiXiDA.Core.Presentation.SignalR.UnitTests.Hosting;
 
 public sealed class ResultContractHostingTests
 {
-    [Fact(DisplayName = "Kestrel hub calls round-trip structured results using only source-generated JSON metadata")]
-    public async Task Hosting_ShouldRoundTripResults()
+    [Fact(DisplayName = "Kestrel hub calls return plain values and void completions using only source-generated JSON metadata")]
+    public async Task Hosting_ShouldReturnPlainValues()
     {
         await using var app = await CreateApplicationAsync();
         await using var connection = CreateConnection(app);
         var cancellationToken = TestContext.Current.CancellationToken;
 
         await connection.StartAsync(cancellationToken);
-        var success = await connection.InvokeAsync<SignalRResult>("Complete", false, cancellationToken);
-        var failure = await connection.InvokeAsync<SignalRResult>("Complete", true, cancellationToken);
-        var zero = await connection.InvokeAsync<SignalRResult<int>>("Number", false, 0, cancellationToken);
-        var failedNumber = await connection.InvokeAsync<SignalRResult<int>>("Number", true, 42, cancellationToken);
-        var boolean = await connection.InvokeAsync<SignalRResult<bool>>("Boolean", false, cancellationToken);
-        var nullable = await connection.InvokeAsync<SignalRResult<string?>>("Nullable", cancellationToken);
+        await connection.InvokeAsync("Complete", false, cancellationToken);
+        var zero = await connection.InvokeAsync<int>("Number", false, 0, cancellationToken);
+        var boolean = await connection.InvokeAsync<bool>("Boolean", false, cancellationToken);
+        var nullable = await connection.InvokeAsync<string?>("Nullable", cancellationToken);
 
-        success.IsSuccess.ShouldBeTrue();
-        success.Errors.ShouldBeEmpty();
-        failure.IsSuccess.ShouldBeFalse();
-        failure.Errors.Select(error => error.Type).ShouldBe(["Validation", "NotFound", "Unexpected"]);
-        failure.Errors[0].Field.ShouldBe("Name");
-        failure.Errors[2].Message.ShouldBe("An unexpected error occurred.");
-        zero.IsSuccess.ShouldBeTrue();
-        zero.Value.ShouldBe(0);
-        failedNumber.IsSuccess.ShouldBeFalse();
-        failedNumber.Value.ShouldBe(0);
-        failedNumber.Errors.ShouldHaveSingleItem().Type.ShouldBe("Conflict");
-        boolean.IsSuccess.ShouldBeTrue();
-        boolean.Value.ShouldBeFalse();
-        nullable.IsSuccess.ShouldBeTrue();
-        nullable.Value.ShouldBeNull();
+        zero.ShouldBe(0);
+        boolean.ShouldBeFalse();
+        nullable.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Kestrel failures use standard client HubExceptions and keep the connection usable")]
+    public async Task Hosting_ShouldUseStandardHubErrors()
+    {
+        await using var app = await CreateApplicationAsync();
+        await using var connection = CreateConnection(app);
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await connection.StartAsync(cancellationToken);
+
+        var validation = await Should.ThrowAsync<HubException>(() => connection.InvokeAsync("Complete", true, cancellationToken));
+        var conflict = await Should.ThrowAsync<HubException>(() => connection.InvokeAsync<int>("Number", true, 42, cancellationToken));
+        var unexpected = await Should.ThrowAsync<HubException>(() => connection.InvokeAsync("Unexpected", cancellationToken));
+
+        validation.Message.ShouldContain("Name is required");
+        validation.Message.ShouldNotContain("Internal secret");
+        conflict.Message.ShouldContain("Conflict");
+        unexpected.Message.ShouldContain("An unexpected error occurred.");
+        unexpected.Message.ShouldNotContain("Internal secret");
+        (await connection.InvokeAsync<int>("Number", false, 42, cancellationToken)).ShouldBe(42);
+        connection.State.ShouldBe(HubConnectionState.Connected);
     }
 
     [Theory(DisplayName = "SignalR rejects invalid JSON contracts before invoking a hub and keeps the connection usable")]
@@ -68,12 +74,11 @@ public sealed class ResultContractHostingTests
         using var valid = JsonDocument.Parse("""{"name":"Melee","count":1,"requiredNote":null}""");
         await connection.StartAsync(cancellationToken);
 
-        await Should.ThrowAsync<HubException>(() => connection.InvokeAsync<SignalRResult<ContractResponse>>("Submit", invalid.RootElement, cancellationToken));
+        await Should.ThrowAsync<HubException>(() => connection.InvokeAsync<ContractResponse>("Submit", invalid.RootElement, cancellationToken));
 
         counter.Calls.ShouldBe(0);
-        var response = await connection.InvokeAsync<SignalRResult<ContractResponse>>("Submit", valid.RootElement, cancellationToken);
-        response.IsSuccess.ShouldBeTrue();
-        response.Value!.Name.ShouldBe("Melee");
+        var response = await connection.InvokeAsync<ContractResponse>("Submit", valid.RootElement, cancellationToken);
+        response.Name.ShouldBe("Melee");
         counter.Calls.ShouldBe(1);
         connection.State.ShouldBe(HubConnectionState.Connected);
     }
@@ -89,10 +94,9 @@ public sealed class ResultContractHostingTests
         var cancellationToken = TestContext.Current.CancellationToken;
         await connection.StartAsync(cancellationToken);
 
-        var response = await connection.InvokeAsync<SignalRResult<ContractResponse>>("Submit", json.RootElement, cancellationToken);
+        var response = await connection.InvokeAsync<ContractResponse>("Submit", json.RootElement, cancellationToken);
 
-        response.IsSuccess.ShouldBeTrue();
-        response.Value!.Name.ShouldBe("Melee");
+        response.Name.ShouldBe("Melee");
         app.Services.GetRequiredService<InvocationCounter>().Calls.ShouldBe(1);
     }
 
@@ -128,40 +132,48 @@ public sealed class ResultContractHostingTests
 
     public sealed class ContractHub(InvocationCounter counter) : Hub
     {
-        public SignalRResult Complete(bool fail)
+        public void Complete(bool fail)
         {
             Context.ConnectionAborted.ThrowIfCancellationRequested();
-            return fail
+            var result = fail
                 ? Result.Failure([
                     Error.Validation("Name is required").WithField("Name"),
                     Error.NotFound("Missing"),
-                    Error.Unexpected("Internal secret").WithMetadata("secret", new object())]).ToSignalRResult()
-                : Result.Success().ToSignalRResult();
+                    Error.Unexpected("Internal secret").WithMetadata("secret", new object())])
+                : Result.Success();
+            result.ThrowIfFailure();
         }
 
-        public SignalRResult<int> Number(bool fail, int value)
+        public int Number(bool fail, int value)
         {
             Context.ConnectionAborted.ThrowIfCancellationRequested();
-            return fail ? Result.Failure<int>(Error.Conflict("Conflict")).ToSignalRResult() : Result.Success(value).ToSignalRResult();
+            var result = fail ? Result.Failure<int>(Error.Conflict("Conflict")) : Result.Success(value);
+            return result.GetValueOrThrow();
         }
 
-        public SignalRResult<bool> Boolean(bool value)
+        public bool Boolean(bool value)
         {
             Context.ConnectionAborted.ThrowIfCancellationRequested();
-            return Result.Success(value).ToSignalRResult();
+            return Result.Success(value).GetValueOrThrow();
         }
 
-        public SignalRResult<string?> Nullable()
+        public string? Nullable()
         {
             Context.ConnectionAborted.ThrowIfCancellationRequested();
-            return Result.Success<string?>(null).ToSignalRResult();
+            return Result.Success<string?>(null).GetValueOrThrow();
         }
 
-        public SignalRResult<ContractResponse> Submit(ContractRequest request)
+        public void Unexpected()
+        {
+            Context.ConnectionAborted.ThrowIfCancellationRequested();
+            Result.Failure(Error.Unexpected("Internal secret").WithMetadata("secret", new object())).ThrowIfFailure();
+        }
+
+        public ContractResponse Submit(ContractRequest request)
         {
             Context.ConnectionAborted.ThrowIfCancellationRequested();
             counter.Calls++;
-            return Result.Success(new ContractResponse(request.Name)).ToSignalRResult();
+            return Result.Success(new ContractResponse(request.Name)).GetValueOrThrow();
         }
     }
 
@@ -175,11 +187,10 @@ public sealed record ContractRequest(string Name, int Count, string? RequiredNot
 public sealed record ContractResponse(string Name);
 
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web, GenerationMode = JsonSourceGenerationMode.Metadata)]
-[JsonSerializable(typeof(SignalRResult))]
-[JsonSerializable(typeof(SignalRResult<int>))]
-[JsonSerializable(typeof(SignalRResult<bool>))]
-[JsonSerializable(typeof(SignalRResult<string>))]
-[JsonSerializable(typeof(SignalRResult<ContractResponse>))]
+[JsonSerializable(typeof(int))]
+[JsonSerializable(typeof(bool))]
+[JsonSerializable(typeof(string))]
+[JsonSerializable(typeof(ContractResponse))]
 [JsonSerializable(typeof(ContractRequest))]
 [JsonSerializable(typeof(JsonElement))]
 internal partial class ContractJsonContext : JsonSerializerContext;

@@ -21,7 +21,7 @@ Application or Mediator packages. Result mapping uses `PANiXiDA.Core.ResultPatte
 ## Features
 
 - Standard SignalR services and builder for additional configuration.
-- Structured ResultPattern responses and strict JSON payload contracts.
+- ResultPattern helpers using standard HubException errors and strict JSON payload contracts.
 - Optional Redis backplane using a named connection string and a literal channel prefix.
 - Startup validation of Redis configuration without printing credentials.
 - Query token forwarding restricted to explicitly registered hub transport paths.
@@ -174,39 +174,40 @@ Application-specific publishers and subscriptions remain in the application.
 
 ## Result mapping
 
-Map application results explicitly with `ToSignalRResult()`. Use the existing
+Handle application results explicitly with `ThrowIfFailure()` or `GetValueOrThrow()`.
+Use the existing
 ResultPattern `Map` extension first when the presentation response differs from
 the application value:
 
 ```csharp
 using PANiXiDA.Core.Presentation.SignalR.Helpers;
-using PANiXiDA.Core.Presentation.SignalR.Results;
 using PANiXiDA.Core.ResultPattern;
 using Microsoft.AspNetCore.SignalR;
 
 public sealed class ResultsHub : Hub
 {
-    public SignalRResult Complete() => Result.Success().ToSignalRResult();
-    public SignalRResult<int> GetCount() => Result.Success(0).ToSignalRResult();
+    public void Complete() => Result.Success().ThrowIfFailure();
+    public int GetCount() => Result.Success(0).GetValueOrThrow();
 }
 ```
 
-The non-generic response contains `isSuccess` and `errors`; the generic response
-also contains `value`. Successful responses have no errors. All failure errors
-retain their order and expose only `type`, `message`, and `field`. Validation
-errors use the field metadata or `general`; other categories use a null field.
-Unexpected and unknown categories become `Unexpected` with the safe message
-`An unexpected error occurred.` Arbitrary error metadata is not serialized.
+On success, `ThrowIfFailure()` returns normally and `GetValueOrThrow()` returns
+the original value, including zero, false, and an allowed null. The hub returns
+an ordinary value/DTO or completes without a value. No response envelope or
+client-side Result model is required.
 
-Read `value` only when `isSuccess` is true. On failure it is `default(TValue)`:
-null for reference/nullable value types, zero for `int`, and false for `bool`.
-Successful zero, false, and nullable null values are preserved. Mapping does not
-read the throwing `Value` property of a failed application result.
+On failure, both helpers throw the standard `HubException` before reading a
+failed result's `Value`. The first error supplies the message for Validation,
+NotFound, Conflict, Unauthorized, Forbidden, or Failure. Unexpected and unknown
+categories use `An unexpected error occurred.` Additional errors, field metadata,
+arbitrary metadata, and internal exception details are not transmitted.
 
-Expected business failures are normal structured return values. Mapping does not
-catch exceptions or change `HubException`, cancellation, authorization, or
-connection lifecycle behavior. It does not serialize errors as exception messages
-or convert hub results automatically in a filter.
+Clients use the standard `invoke` / `InvokeAsync` error path: .NET clients receive
+`HubException`; JavaScript clients receive a rejected promise with an `Error`.
+There are no structured error categories or HTTP status codes for these RPC
+failures. The helpers do not catch unrelated exceptions or change cancellation,
+authorization, connection lifecycle callbacks, or outgoing notification
+contracts. They are not invoked automatically by a filter.
 
 ## JSON contracts
 
@@ -228,19 +229,22 @@ The host can further configure the standard `AddJsonProtocol` callback. Its
 resolver chain, converters, naming policy, and other settings are preserved.
 MessagePack and other protocols are not changed.
 
-For Native AOT, register source-generated metadata for every closed response type
-and application payload. For example:
+For Native AOT, register source-generated metadata for the actual method argument
+and return types. For example:
 
 ```csharp
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using PANiXiDA.Core.Presentation.SignalR.Results;
 
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web,
     GenerationMode = JsonSourceGenerationMode.Metadata)]
-[JsonSerializable(typeof(SignalRResult))]
-[JsonSerializable(typeof(SignalRResult<int>))]
+[JsonSerializable(typeof(int))]
+[JsonSerializable(typeof(bool))]
+[JsonSerializable(typeof(string))]
+[JsonSerializable(typeof(CountResponse))]
 internal partial class HubJsonContext : JsonSerializerContext;
+
+public sealed record CountResponse(int Count);
 ```
 
 ```csharp
@@ -249,9 +253,9 @@ builder.Services.AddSignalR(builder.Configuration)
         options.PayloadSerializerOptions.TypeInfoResolverChain.Insert(0, HubJsonContext.Default));
 ```
 
-Add closed types such as `SignalRResult<MyResponse>` and request DTOs to that
+Add application request/response DTOs and other RPC argument/return types to that
 context when the application uses them. Configure .NET clients with their own
-source-generated context as needed. The mapper uses no reflection, dynamic
+source-generated context as needed. The helpers use no reflection, dynamic
 generic construction, or custom serializer converter.
 
 ## Logging

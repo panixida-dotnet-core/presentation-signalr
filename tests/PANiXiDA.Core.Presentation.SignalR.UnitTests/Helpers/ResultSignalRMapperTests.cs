@@ -1,121 +1,92 @@
+using Microsoft.AspNetCore.SignalR;
+
 using PANiXiDA.Core.Presentation.SignalR.Helpers;
-using PANiXiDA.Core.Presentation.SignalR.Results;
 using PANiXiDA.Core.ResultPattern;
 
 namespace PANiXiDA.Core.Presentation.SignalR.UnitTests.Helpers;
 
 public sealed class ResultSignalRMapperTests
 {
-    [Fact(DisplayName = "Successful results without a value have no errors")]
-    public void ToSignalRResult_ShouldMapSuccess()
+    [Fact(DisplayName = "Successful results without a value complete without an exception")]
+    public void ThrowIfFailure_ShouldAcceptSuccess()
     {
-        var response = Result.Success().ToSignalRResult();
-
-        response.IsSuccess.ShouldBeTrue();
-        response.Errors.ShouldBeEmpty();
+        Should.NotThrow(() => Result.Success().ThrowIfFailure());
     }
 
-    [Theory(DisplayName = "Successful generic results preserve default values")]
+    [Theory(DisplayName = "Successful generic results return their original values")]
     [InlineData(0)]
     [InlineData(42)]
-    public void ToSignalRResult_ShouldPreserveValues(int value)
+    public void GetValueOrThrow_ShouldPreserveValues(int value)
     {
-        var response = Result.Success(value).ToSignalRResult();
-
-        response.IsSuccess.ShouldBeTrue();
-        response.Value.ShouldBe(value);
-        response.Errors.ShouldBeEmpty();
+        Result.Success(value).GetValueOrThrow().ShouldBe(value);
     }
 
     [Fact(DisplayName = "Successful results preserve false and nullable reference and value types")]
-    public void ToSignalRResult_ShouldPreserveFalseAndNull()
+    public void GetValueOrThrow_ShouldPreserveFalseAndNull()
     {
-        var boolean = Result.Success(false).ToSignalRResult();
-        var nullable = Result.Success<string?>(null).ToSignalRResult();
-        var nullableNumber = Result.Success<int?>(null).ToSignalRResult();
-
-        boolean.IsSuccess.ShouldBeTrue();
-        boolean.Value.ShouldBeFalse();
-        nullable.IsSuccess.ShouldBeTrue();
-        nullable.Value.ShouldBeNull();
-        nullableNumber.IsSuccess.ShouldBeTrue();
-        nullableNumber.Value.ShouldBeNull();
+        Result.Success(false).GetValueOrThrow().ShouldBeFalse();
+        Result.Success<string?>(null).GetValueOrThrow().ShouldBeNull();
+        Result.Success<int?>(null).GetValueOrThrow().ShouldBeNull();
     }
 
-    [Theory(DisplayName = "Expected errors preserve their category and message without exposing metadata")]
+    [Theory(DisplayName = "Expected failures become standard HubExceptions containing only the public message")]
+    [InlineData(ErrorType.Validation)]
     [InlineData(ErrorType.NotFound)]
     [InlineData(ErrorType.Conflict)]
     [InlineData(ErrorType.Unauthorized)]
     [InlineData(ErrorType.Forbidden)]
     [InlineData(ErrorType.Failure)]
-    public void ToSignalRResult_ShouldMapExpectedErrors(ErrorType type)
+    public void ThrowIfFailure_ShouldMapExpectedErrors(ErrorType type)
     {
         var error = new Error("Expected failure", type).WithMetadata("secret", "private-value");
 
-        var response = Result.Failure(error).ToSignalRResult();
+        var exception = Should.Throw<HubException>(() => Result.Failure(error).ThrowIfFailure());
 
-        response.IsSuccess.ShouldBeFalse();
-        response.Errors.ShouldHaveSingleItem().ShouldBe(new SignalRError(type.ToString(), "Expected failure", null));
+        exception.GetType().ShouldBe(typeof(HubException));
+        exception.Message.ShouldBe("Expected failure");
+        exception.InnerException.ShouldBeNull();
+        exception.Data.Count.ShouldBe(0);
     }
 
-    [Theory(DisplayName = "Unexpected and unknown error categories do not expose internal messages")]
+    [Theory(DisplayName = "Unexpected and unknown error categories do not expose internal details")]
     [InlineData(ErrorType.Unexpected)]
     [InlineData((ErrorType)123)]
-    public void ToSignalRResult_ShouldSanitizeUnexpectedErrors(ErrorType type)
+    public void ThrowIfFailure_ShouldSanitizeUnexpectedErrors(ErrorType type)
     {
-        var response = Result.Failure(new Error("Internal database detail", type)).ToSignalRResult();
+        var result = Result.Failure(new Error("Internal database detail", type));
 
-        response.Errors.ShouldHaveSingleItem().ShouldBe(new SignalRError("Unexpected", "An unexpected error occurred.", null));
+        var exception = Should.Throw<HubException>(() => result.ThrowIfFailure());
+
+        exception.Message.ShouldBe("An unexpected error occurred.");
     }
 
-    [Theory(DisplayName = "Validation errors expose a valid field name or use the general fallback")]
-    [InlineData(null, "general")]
-    [InlineData("", "general")]
-    [InlineData(" ", "general")]
-    [InlineData("BuildId", "BuildId")]
-    [InlineData(42, "general")]
-    public void ToSignalRResult_ShouldMapValidationFields(object? field, string expected)
+    [Fact(DisplayName = "Multiple errors use the first error without exposing additional messages or field metadata")]
+    public void ThrowIfFailure_ShouldUseFirstError()
     {
-        var error = Error.Validation("Invalid value");
-        if (field is not null) { error = error.WithMetadata(Error.FieldMetadataKey, field); }
+        var result = Result.Failure([
+            Error.Validation("Invalid name").WithField("Name"),
+            Error.Unexpected("Internal secret")]);
 
-        var response = Result.Failure(error).ToSignalRResult();
+        var exception = Should.Throw<HubException>(() => result.ThrowIfFailure());
 
-        response.Errors.ShouldHaveSingleItem().ShouldBe(new SignalRError("Validation", "Invalid value", expected));
+        exception.Message.ShouldBe("Invalid name");
+        exception.Data.Count.ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Multiple errors retain order and are exposed as a read-only snapshot")]
-    public void ToSignalRResult_ShouldPreserveAllErrors()
+    [Fact(DisplayName = "Failed generic results throw HubException before accessing their throwing Value property")]
+    public void GetValueOrThrow_ShouldMapFailure()
     {
-        var response = Result.Failure([
-            Error.Validation("First").WithField("Name"),
-            Error.Conflict("Second"),
-            Error.Validation("Third").WithField("Name")]).ToSignalRResult();
+        var reference = Result.Failure<string>(Error.NotFound("Missing"));
+        var number = Result.Failure<int>(Error.Unexpected("Internal secret"));
 
-        response.Errors.Select(error => error.Message).ShouldBe(["First", "Second", "Third"]);
-        var errors = response.Errors.ShouldBeAssignableTo<IList<SignalRError>>();
-        errors.IsReadOnly.ShouldBeTrue();
-        Should.Throw<NotSupportedException>(() => errors[0] = new SignalRError("Failure", "Changed", null));
+        Should.Throw<HubException>(() => reference.GetValueOrThrow()).Message.ShouldBe("Missing");
+        Should.Throw<HubException>(() => number.GetValueOrThrow()).Message.ShouldBe("An unexpected error occurred.");
     }
 
-    [Fact(DisplayName = "Failed generic results can be mapped without accessing their throwing Value property")]
-    public void ToSignalRResult_ShouldMapFailedGenericResults()
+    [Fact(DisplayName = "Both result helpers reject null arguments")]
+    public void ResultHelpers_ShouldRejectNull()
     {
-        var reference = Result.Failure<string>(Error.NotFound("Missing")).ToSignalRResult();
-        var number = Result.Failure<int>(Error.NotFound("Missing")).ToSignalRResult();
-
-        reference.IsSuccess.ShouldBeFalse();
-        reference.Value.ShouldBeNull();
-        reference.Errors.ShouldHaveSingleItem().Type.ShouldBe("NotFound");
-        number.IsSuccess.ShouldBeFalse();
-        number.Value.ShouldBe(0);
-        number.Errors.ShouldBe(reference.Errors);
-    }
-
-    [Fact(DisplayName = "Null results are rejected by both mapper overloads")]
-    public void ToSignalRResult_ShouldRejectNull()
-    {
-        Should.Throw<ArgumentNullException>(() => ((Result)null!).ToSignalRResult()).ParamName.ShouldBe("result");
-        Should.Throw<ArgumentNullException>(() => ((Result<string>)null!).ToSignalRResult()).ParamName.ShouldBe("result");
+        Should.Throw<ArgumentNullException>(() => ((Result)null!).ThrowIfFailure()).ParamName.ShouldBe("result");
+        Should.Throw<ArgumentNullException>(() => ((Result<string>)null!).GetValueOrThrow()).ParamName.ShouldBe("result");
     }
 }
