@@ -206,7 +206,9 @@ public sealed class SignalRDocumentationTests
 public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHubEndpoint
 {
     public static string Name => "matchmaking";
+
     public static string Summary => "Matchmaking";
+
     public static ApiVersion ApiVersion => new(1, 0);
 
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<DocumentationHub>("/v1/state").RequireAuthorization();
@@ -217,18 +219,26 @@ public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHub
         Task.FromResult(new DocumentationPayload(id, "searching"));
 
     public ChannelReader<DocumentationPayload> Watch(CancellationToken cancellationToken) => Channel.CreateUnbounded<DocumentationPayload>().Reader;
+
     public Task Upload(IAsyncEnumerable<DocumentationPayload> updates) => Task.CompletedTask;
+
     public Task<DerivedDocumentationReader> WatchDerived() => Task.FromResult<DerivedDocumentationReader>(null!);
+
     public void Bulk(IEnumerable<DocumentationPayload> values) { }
+
     private string Hidden() => "hidden";
 }
 
 public sealed class DocumentationV2Hub : Hub, IDocumentedHubEndpoint
 {
     public static string Name => "matchmaking";
+
     public static string Summary => "Matchmaking";
+
     public static ApiVersion ApiVersion => new(2, 0);
+
     public static bool IsDeprecated => true;
+
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<DocumentationV2Hub>("/v2/state");
 
     public ValueTask<DocumentationPayload> Read() => ValueTask.FromResult(new DocumentationPayload(Guid.Empty, "ready"));

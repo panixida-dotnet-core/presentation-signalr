@@ -23,10 +23,13 @@ public sealed class HubParameterDescription
 
     /// <summary>Gets the parameter name.</summary>
     public string Name { get; }
+
     /// <summary>Gets the payload type.</summary>
     public Type Type { get; }
+
     /// <summary>Gets whether the parameter is a stream.</summary>
     public bool IsStream { get; }
+
     /// <summary>Gets whether implicit service resolution applies to this parameter.</summary>
     public bool AllowImplicitServices { get; }
 }

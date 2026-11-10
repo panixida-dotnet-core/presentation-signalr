@@ -164,6 +164,7 @@ internal static class HubDocumentationEmitter
     }
 
     private static string AttributeName(AttributeData attribute) => attribute.AttributeConstructor?.ContainingType.ToDisplayString() ?? string.Empty;
+
     private static string? AttributeValue(IMethodSymbol method, string attributeName)
     {
         var attribute = method.GetAttributes().FirstOrDefault(item => AttributeName(item) == attributeName);
@@ -285,5 +286,6 @@ internal static class HubDocumentationEmitter
     }
 
     private static string Literal(string? value) => value is null ? "null" : SymbolDisplay.FormatLiteral(value, true);
+
     private static string TypeName(ITypeSymbol type) => type.TypeKind == TypeKind.Dynamic ? "global::System.Object" : type.WithNullableAnnotation(NullableAnnotation.NotAnnotated).ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 }

@@ -171,8 +171,11 @@ public sealed class OperationMetadataTests
 public sealed class MetadataHub : Hub<IMetadataClient>, IDocumentedHubEndpoint
 {
     public static string Name => "metadata";
+
     public static string Summary => "Metadata";
+
     public static ApiVersion ApiVersion => new(1, 0);
+
     public static IReadOnlyDictionary<string, ApiOperationMetadata> Operations { get; } = new Dictionary<string, ApiOperationMetadata>
     {
         [nameof(Read)] = new("ContractRead"),
@@ -217,8 +220,12 @@ public interface IMetadataClient
 public abstract class ContractGuardHub : Hub, IDocumentedHubEndpoint
 {
     public static string Name { get; set; } = "guard";
+
     public static string Summary { get; set; } = "Guard";
+
     public static ApiVersion ApiVersion { get; set; } = new(1, 0);
+
     public static IReadOnlyDictionary<string, ApiOperationMetadata> Operations { get; set; } = new Dictionary<string, ApiOperationMetadata>();
+
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<ContractGuardHub>("/guard");
 }

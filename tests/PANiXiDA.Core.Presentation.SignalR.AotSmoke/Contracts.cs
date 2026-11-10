@@ -11,10 +11,13 @@ public sealed class SmokeHub : Hub, IDocumentedHubEndpoint
 {
     /// <summary>Gets the document module name.</summary>
     public static string Name => "smoke";
+
     /// <summary>Gets the document title.</summary>
     public static string Summary => "Smoke";
+
     /// <summary>Gets the contract version.</summary>
     public static ApiVersion ApiVersion => new(1, 0);
+
     /// <summary>Gets operation metadata used by the local AOT check.</summary>
     public static IReadOnlyDictionary<string, ApiOperationMetadata> Operations { get; } =
         new Dictionary<string, ApiOperationMetadata> { [nameof(Echo)] = new("ContractEcho", "Contract summary") };
@@ -24,6 +27,7 @@ public sealed class SmokeHub : Hub, IDocumentedHubEndpoint
     /// <returns>The endpoint conventions.</returns>
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<SmokeHub>("/hub")
         .WithOperation(nameof(Echo), name: "Echo payload");
+
     /// <summary>Returns the supplied payload.</summary>
     /// <param name="payload">The payload.</param>
     /// <returns>The same payload.</returns>

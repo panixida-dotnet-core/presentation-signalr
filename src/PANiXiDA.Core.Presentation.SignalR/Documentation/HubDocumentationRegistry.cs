@@ -87,6 +87,7 @@ internal sealed record HubDescription(ApiDocumentDescriptor Document, IReadOnlyL
 internal sealed class MappedHubDocumentation
 {
     internal List<MappedHubDescription> Hubs { get; } = [];
+
     internal Func<IReadOnlyList<Endpoint>>? Endpoints { get; set; }
 
     internal void Add(Type hubType, string path, HttpConnectionDispatcherOptions connectionOptions)
