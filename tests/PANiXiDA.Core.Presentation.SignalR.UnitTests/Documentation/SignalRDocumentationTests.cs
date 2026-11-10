@@ -126,6 +126,8 @@ public sealed class SignalRDocumentationTests
         var descriptor = new ApiDocumentDescriptor("plain", "Plain", "plain", "1", ApiDocumentFormat.AsyncApi);
         Should.Throw<ArgumentNullException>(() => HubDocumentationRegistry.RegisterHub<PlainHub>(descriptor, null!));
         Should.Throw<ArgumentException>(() => HubDocumentationRegistry.RegisterHub<PlainHub>(descriptor, [null!]));
+        Should.Throw<ArgumentException>(() => HubDocumentationRegistry.RegisterHub<PlainHub>(
+            new ApiDocumentDescriptor("http", "HTTP", "plain", "1", ApiDocumentFormat.OpenApi)));
     }
 
     [Theory(DisplayName = "SignalR documents reject conflicting module version title or deprecation metadata")]
