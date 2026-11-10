@@ -58,6 +58,7 @@ public sealed class SignalRDocumentationTests
         read["bindings"]!["x-signalr"]!["authorizationRequired"]!.GetValue<bool>().ShouldBeTrue();
         read["reply"].ShouldNotBeNull();
         var reply = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.read-state@/v1/state.result", StringComparison.Ordinal)).Value!;
+        reply["title"]!.GetValue<string>().ShouldBe("Read response");
         reply["payload"]!["schema"]!["oneOf"]![0]!["properties"]!["result"]!["properties"]!["state"].ShouldNotBeNull();
         reply["payload"]!["schema"]!["oneOf"]![1]!["properties"]!["error"]!["type"]!.GetValue<string>().ShouldBe("string");
         operations.Any(operation => operation.Key.Contains("Hidden", StringComparison.Ordinal)).ShouldBeFalse();
@@ -66,6 +67,13 @@ public sealed class SignalRDocumentationTests
         operations.Single(operation => operation.Key.Contains("hub.Watch@", StringComparison.Ordinal)).Value!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
         operations.Single(operation => operation.Key.Contains(".upload.updates", StringComparison.Ordinal)).Value!["action"]!.GetValue<string>().ShouldBe("receive");
         var message = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.read-state@/v1/state", StringComparison.Ordinal)).Value!;
+        message["title"]!.GetValue<string>().ShouldBe("Read request");
+        var streamed = document["components"]!["messages"]!.AsObject()
+            .Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.Watch@/v1/state.result", StringComparison.Ordinal)).Value!;
+        streamed["title"]!.GetValue<string>().ShouldBe("Watch stream");
+        var uploaded = document["components"]!["messages"]!.AsObject()
+            .Single(message => message.Value!["name"]!.GetValue<string>().EndsWith(".upload.updates", StringComparison.Ordinal)).Value!;
+        uploaded["title"]!.GetValue<string>().ShouldBe("Upload / updates stream");
         message["payload"]!["schema"]!["properties"]!["arguments"]!["minItems"]!.GetValue<int>().ShouldBe(1);
         var bulk = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.Bulk@/v1/state", StringComparison.Ordinal)).Value!;
         bulk["payload"]!["schema"]!["properties"]!["arguments"]!["minItems"]!.GetValue<int>().ShouldBe(1);

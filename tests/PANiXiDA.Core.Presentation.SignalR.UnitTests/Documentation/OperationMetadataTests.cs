@@ -33,6 +33,8 @@ public sealed class OperationMetadataTests
         read["title"]!.GetValue<string>().ShouldBe("ContractRead");
         read["summary"]!.GetValue<string>().ShouldBe("Attribute summary");
         read["bindings"]!["x-signalr"]!["target"]!.GetValue<string>().ShouldBe("wire-read");
+        Message(document, read)["title"]!.GetValue<string>().ShouldBe("ContractRead request");
+        Message(document, read, reply: true)["title"]!.GetValue<string>().ShouldBe("ContractRead response");
         Operation(document, "/metadata", nameof(MetadataHub.OnlyContract))["summary"]!.GetValue<string>().ShouldBe("Contract summary");
         Operation(document, "/metadata", nameof(MetadataHub.ClearSummary))["summary"]!.GetValue<string>().ShouldBeEmpty();
         Operation(document, "/metadata", nameof(MetadataHub.OnlyAttributes))["title"]!.GetValue<string>().ShouldBe("AttributeOnly");
@@ -42,6 +44,37 @@ public sealed class OperationMetadataTests
         Operation(document, "/metadata", nameof(MetadataHub.Defaults))["title"]!.GetValue<string>().ShouldBe(nameof(MetadataHub.Defaults));
         Operation(document, "/metadata", nameof(MetadataHub.Defaults))["summary"].ShouldBeNull();
         Operation(document, "/metadata", nameof(IMetadataClient.Changed), true)["title"]!.GetValue<string>().ShouldBe("ContractNotification");
+        Message(document, Operation(document, "/metadata", nameof(IMetadataClient.Changed), true))["title"]!
+            .GetValue<string>().ShouldBe("ContractNotification notification");
+        var confirmation = Operation(document, "/metadata", nameof(IMetadataClient.Confirm), true);
+        Message(document, confirmation)["title"]!.GetValue<string>().ShouldBe("Confirm request");
+        Message(document, confirmation, reply: true)["title"]!.GetValue<string>().ShouldBe("Confirm response");
+    }
+
+    [Fact(DisplayName = "Changing display names only changes operation and message titles while preserving the complete transport contract")]
+    public async Task RenamesOnlyDocumentationTitles()
+    {
+        await using var original = CreateApplication();
+        original.UseSignalR(hubs => hubs.MapHub<MetadataHub>("/metadata"));
+        var before = Generate(original);
+        await using var renamed = CreateApplication();
+        renamed.UseSignalR(hubs => hubs.MapHub<MetadataHub>("/metadata")
+            .WithOperation(nameof(MetadataHub.Read), name: "Read current state"));
+
+        var after = Generate(renamed);
+
+        var operation = Operation(after, "/metadata", "wire-read");
+        Message(after, operation)["title"]!.GetValue<string>().ShouldBe("Read current state request");
+        Message(after, operation, reply: true)["title"]!.GetValue<string>().ShouldBe("Read current state response");
+        foreach (var document in new[] { before, after })
+        {
+            foreach (var item in document["operations"]!.AsObject().Concat(document["components"]!["messages"]!.AsObject()))
+            {
+                item.Value!.AsObject().Remove("title");
+            }
+        }
+
+        JsonNode.DeepEquals(before, after).ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Map overrides are ordered per field and isolated to each mapped path including typed callbacks")]
@@ -165,6 +198,12 @@ public sealed class OperationMetadataTests
             operation.Value!["bindings"]!["x-signalr"]!["target"]!.GetValue<string>() == target &&
             operation.Value["action"]!.GetValue<string>() == (client ? "send" : "receive")).Value!;
 
+    private static JsonNode Message(JsonObject document, JsonNode operation, bool reply = false)
+    {
+        var reference = (reply ? operation["reply"] : operation)!["messages"]![0]!["$ref"]!.GetValue<string>();
+        return document["components"]!["messages"]![reference.Split('/')[^1]]!;
+    }
+
     public abstract class LegacyGuardHub : Hub;
 }
 
@@ -215,6 +254,8 @@ public interface IMetadataClient
     [EndpointName("AttributeNotification")]
     [EndpointSummary("Attribute callback summary")]
     Task Changed(string value);
+
+    Task<string> Confirm();
 }
 
 public abstract class ContractGuardHub : Hub, IDocumentedHubEndpoint

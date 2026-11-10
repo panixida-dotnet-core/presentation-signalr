@@ -119,7 +119,10 @@ internal sealed class SignalRDocumentSource(
         {
             var streamId = id + ".upload." + parameter.Name;
             return new AsyncApiOperation(streamId, context.Path, AsyncApiAction.Receive,
-                new AsyncApiMessage(streamId, CreateReplySchema(parameter.Type, true)), context.WireProtocol)
+                new AsyncApiMessage(streamId, CreateReplySchema(parameter.Type, true))
+                {
+                    Title = documentation.Name + " / " + parameter.Name + " stream"
+                }, context.WireProtocol)
             {
                 Name = documentation.Name + " / " + parameter.Name,
                 Bindings = new JsonObject
@@ -153,13 +156,20 @@ internal sealed class SignalRDocumentSource(
             ["transports"] = TransportNames(context.Transports),
             ["transportProtocol"] = context.WireProtocol
         };
+        var message = new AsyncApiMessage(id, InvocationSchema(method, parameters, streamNames.Count))
+        {
+            Title = documentation.Name + (method.IsClientMethod && method.ResultType is null ? " notification" : " request")
+        };
         return new AsyncApiOperation(id, context.Path, method.IsClientMethod ? AsyncApiAction.Send : AsyncApiAction.Receive,
-            new AsyncApiMessage(id, InvocationSchema(method, parameters, streamNames.Count)), context.WireProtocol, documentation.Summary)
+            message, context.WireProtocol, documentation.Summary)
         {
             Name = documentation.Name,
             Bindings = new JsonObject { ["x-signalr"] = binding },
             Reply = !method.IsClientMethod || method.ResultType is not null
-                ? new AsyncApiMessage(id + ".result", CreateReplySchema(method.ResultType, method.IsStream)) : null
+                ? new AsyncApiMessage(id + ".result", CreateReplySchema(method.ResultType, method.IsStream))
+                {
+                    Title = documentation.Name + (method.IsStream ? " stream" : " response")
+                } : null
         };
     }
 
