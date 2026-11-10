@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.SignalR;
@@ -66,6 +67,9 @@ public sealed class SignalRDocumentationTests
         message["payload"]!["schema"]!["properties"]!["arguments"]!["minItems"]!.GetValue<int>().ShouldBe(1);
         var bulk = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.Bulk@/v1/state", StringComparison.Ordinal)).Value!;
         bulk["payload"]!["schema"]!["properties"]!["arguments"]!["minItems"]!.GetValue<int>().ShouldBe(1);
+        var uploadReply = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.Upload@/v1/state.result", StringComparison.Ordinal)).Value!;
+        uploadReply["payload"]!["schema"]!["oneOf"]![0]!["properties"]!["result"]!["type"]!.GetValue<string>().ShouldBe("null");
+        operations.Single(operation => operation.Key.Contains("hub.WatchDerived@", StringComparison.Ordinal)).Value!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
         var v2 = source.Generate("matchmaking-signalr-v2", TestContext.Current.CancellationToken);
         v2["info"]!["x-deprecated"]!.GetValue<bool>().ShouldBeTrue();
         Should.Throw<ArgumentException>(() => source.Generate("missing"));
@@ -117,8 +121,8 @@ public sealed class SignalRDocumentationTests
         var mappings = app.Services.GetRequiredService<MappedHubDocumentation>();
         var first = new ApiDocumentDescriptor("module-signalr-v1", "Title", "module", "1.0", ApiDocumentFormat.AsyncApi);
         var second = new ApiDocumentDescriptor("module-signalr-v1", title, module, version, ApiDocumentFormat.AsyncApi, deprecated: deprecated);
-        mappings.Hubs.Add((typeof(PlainHub), "/first", new HubDescription(first, [], _ => new HubOptions())));
-        mappings.Hubs.Add((typeof(PlainHub), "/second", new HubDescription(second, [], _ => new HubOptions())));
+        mappings.Hubs.Add(new(typeof(PlainHub), "/first", new HubDescription(first, [], _ => new HubOptions()), new()));
+        mappings.Hubs.Add(new(typeof(PlainHub), "/second", new HubDescription(second, [], _ => new HubOptions()), new()));
         Should.Throw<InvalidOperationException>(() => app.Services.GetRequiredService<ApiDocumentCatalog>().GetDocuments());
     }
 
@@ -154,11 +158,40 @@ public sealed class SignalRDocumentationTests
         await using var app = builder.Build();
         var descriptor = new ApiDocumentDescriptor("module-signalr-v1", "Module", "module", "1.0", ApiDocumentFormat.AsyncApi);
         var mappings = new MappedHubDocumentation();
-        mappings.Hubs.Add((typeof(PlainHub), "/plain", new HubDescription(descriptor,
-            [new HubMethodDescription("Read", [new HubParameterDescription("id", typeof(Guid))])], _ => new HubOptions())));
+        mappings.Hubs.Add(new(typeof(PlainHub), "/plain", new HubDescription(descriptor,
+            [new HubMethodDescription("Read", [new HubParameterDescription("id", typeof(Guid))])], _ => new HubOptions()), new()));
         var source = new SignalRDocumentSource(mappings, new ApiSchemaRegistry([DocumentationJsonContext.Default]),
             new NonIntrospectingProvider(app.Services));
         source.Generate(descriptor.Name, TestContext.Current.CancellationToken)["operations"]!.AsObject().Count.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Documented transports and protocols match actual SignalR negotiation")]
+    [InlineData(HttpTransportType.WebSockets, 2)]
+    [InlineData(HttpTransportType.ServerSentEvents, 1)]
+    [InlineData(HttpTransportType.LongPolling, 2)]
+    public async Task HonorsMappedTransports(HttpTransportType transport, int protocolCount)
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddSignalR(builder.Configuration);
+        builder.Services.AddApiDocumentationSchemas(DocumentationJsonContext.Default);
+        await using var app = builder.Build();
+        app.UseSignalR(hubs => hubs.MapHub<DocumentationV2Hub>("/limited", options => options.Transports = transport));
+        await app.StartAsync(TestContext.Current.CancellationToken);
+        var source = app.Services.GetServices<IApiDocumentSource>().OfType<IAsyncApiDocumentSource>().Single();
+        var document = source.Generate("matchmaking-signalr-v2", TestContext.Current.CancellationToken);
+        var binding = document["operations"]!.AsObject().Single().Value!["bindings"]!["x-signalr"]!;
+        binding["transports"]!.AsArray().Select(node => node!.GetValue<string>()).ShouldBe([transport.ToString()]);
+        binding["protocols"]!.AsArray().Count.ShouldBe(protocolCount);
+        binding["transportProtocol"]!.GetValue<string>().ShouldBe(transport == HttpTransportType.WebSockets ? "ws" : "http");
+        var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+        using var client = new HttpClient { BaseAddress = new Uri(address) };
+        using var response = await client.PostAsync("/limited/negotiate?negotiateVersion=1", null, TestContext.Current.CancellationToken);
+        var negotiation = JsonNode.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))!;
+        negotiation["availableTransports"]![0]!["transport"]!.GetValue<string>().ShouldBe(transport.ToString());
+        negotiation["availableTransports"]!.AsArray().Count.ShouldBe(1);
+        await app.StopAsync(TestContext.Current.CancellationToken);
     }
 
     private sealed class NonIntrospectingProvider(IServiceProvider services) : IServiceProvider
@@ -180,6 +213,7 @@ public sealed class DocumentationHub : Hub<IDocumentationClient>
 
     public ChannelReader<DocumentationPayload> Watch(CancellationToken cancellationToken) => Channel.CreateUnbounded<DocumentationPayload>().Reader;
     public Task Upload(IAsyncEnumerable<DocumentationPayload> updates) => Task.CompletedTask;
+    public Task<DerivedDocumentationReader> WatchDerived() => Task.FromResult<DerivedDocumentationReader>(null!);
     public void Bulk(IEnumerable<DocumentationPayload> values) { }
     private string Hidden() => "hidden";
 }
@@ -192,8 +226,10 @@ public sealed class DocumentationV2Hub : Hub
 
 public interface IDocumentationClient
 {
-    Task Changed(DocumentationPayload state);
+    Task Changed(DocumentationPayload state, CancellationToken cancellationToken);
 }
+
+public abstract class DerivedDocumentationReader : ChannelReader<DocumentationPayload>;
 
 public sealed class DocumentationDependency;
 public sealed record DocumentationPayload(Guid Id, string State);

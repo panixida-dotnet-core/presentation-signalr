@@ -377,7 +377,7 @@ public sealed class MatchmakingHub : Hub, IHubEndpoint
 
 The example assumes an application DTO such as `public sealed record SearchState(Guid SearchId);`.
 
-The generator discovers public hub methods, inherited methods, `HubMethodName` targets, typed `Hub<TClient>` callbacks, `Task`/`ValueTask` results, and `IAsyncEnumerable<T>`/`ChannelReader<T>` streams. XML summaries are extracted at compile time. DI parameters and streaming cancellation tokens are excluded from serialized arguments. Overloaded targets or generic methods produce a build diagnostic for documented hubs.
+The generator discovers public hub methods, inherited methods, `HubMethodName` targets, typed `Hub<TClient>` callbacks, `Task`/`ValueTask` results, and `IAsyncEnumerable<T>`/`ChannelReader<T>` streams. XML summaries are extracted at compile time. DI parameters, streaming cancellation tokens and trailing typed-callback cancellation tokens are excluded from serialized arguments. Return streams include implemented interfaces and inherited channel readers. Overloaded targets or generic methods produce a build diagnostic for documented hubs.
 
 Register source-generated JSON metadata for every argument, result and stream item, then use the independent presenter in the host:
 
@@ -391,7 +391,7 @@ app.UseApiDocumentation();
 
 The last two calls require `PANiXiDA.Core.Presentation.Scalar.DependencyInjection` and the existing SignalR dependency injection namespace. `ApplicationJsonContext` is an application-owned `[JsonSerializable]` context. It supplies schemas; configure the same contracts for SignalR JSON serialization and MessagePack shapes as usual. Missing schema metadata fails explicitly without reflection fallback.
 
-`/asyncapi/matchmaking-signalr-v1.json` contains the hub's actual mapped path, invocation arguments, return values, callbacks and stream items. `x-signalr` bindings identify targets, streams, enabled protocols and authorization requirements. JSON invocation, completion and stream-item envelopes include generated DTO schemas; completion errors remain strings. MessagePack uses the same application payload types with its binary protocol encoding. Errors still use SignalR completion errors and `HubException`.
+`/asyncapi/matchmaking-signalr-v1.json` contains the hub's actual mapped path, invocation arguments, return values, callbacks and stream items. `x-signalr` bindings identify targets, streams, enabled protocols, mapped transports and authorization requirements. JSON invocation, completion and stream-item envelopes include generated DTO schemas; completion errors remain strings. MessagePack uses the same application payload types with its binary protocol encoding. Errors still use SignalR completion errors and `HubException`.
 
 Each module/version gets a separate document. Use separate hub types/routes for independently deployed versions; `ApiContract` documents versioning and does not rewrite routes or negotiate versions. Unmarked hubs keep their existing behavior and do not produce documents. Untyped `Clients.SendAsync` target names cannot be inferred statically; use an explicit document source for such notifications.
 

@@ -46,8 +46,13 @@ public sealed class HubMapBuilder
             throw new ArgumentException("Hub paths must be unique.", nameof(path));
         }
 
-        var mapped = _endpoints.MapHub<THub>(normalizedPath, configureOptions);
-        _endpoints.ServiceProvider.GetService<MappedHubDocumentation>()?.Add(typeof(THub), normalizedPath);
+        HttpConnectionDispatcherOptions? connectionOptions = null;
+        var mapped = _endpoints.MapHub<THub>(normalizedPath, options =>
+        {
+            configureOptions?.Invoke(options);
+            connectionOptions = options;
+        });
+        _endpoints.ServiceProvider.GetService<MappedHubDocumentation>()?.Add(typeof(THub), normalizedPath, connectionOptions!);
         return mapped;
     }
 

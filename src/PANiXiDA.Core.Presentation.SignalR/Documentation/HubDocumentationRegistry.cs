@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
@@ -40,13 +41,16 @@ internal sealed record HubDescription(ApiDocumentDescriptor Document, IReadOnlyL
 
 internal sealed class MappedHubDocumentation
 {
-    internal List<(Type HubType, string Path, HubDescription Description)> Hubs { get; } = [];
+    internal List<MappedHubDescription> Hubs { get; } = [];
 
-    internal void Add(Type hubType, string path)
+    internal void Add(Type hubType, string path, HttpConnectionDispatcherOptions connectionOptions)
     {
         if (HubDocumentationRegistry.Find(hubType) is { } description)
         {
-            Hubs.Add((hubType, path, description));
+            Hubs.Add(new(hubType, path, description, connectionOptions));
         }
     }
 }
+
+internal sealed record MappedHubDescription(Type HubType, string Path, HubDescription Description,
+    HttpConnectionDispatcherOptions ConnectionOptions);

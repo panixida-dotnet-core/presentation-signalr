@@ -131,7 +131,8 @@ internal static class HubDocumentationEmitter
 
     private static bool ShouldSerialize(IParameterSymbol parameter, bool resultStream, bool client)
     {
-        if (resultStream && !client && parameter.Type.ToDisplayString() == "System.Threading.CancellationToken")
+        if (parameter.Type.ToDisplayString() == "System.Threading.CancellationToken" &&
+            (!client && resultStream || client && parameter.Ordinal == ((IMethodSymbol)parameter.ContainingSymbol).Parameters.Length - 1))
         {
             return false;
         }
@@ -226,7 +227,33 @@ internal static class HubDocumentationEmitter
             return null;
         }
 
-        return StreamItem(type, out stream);
+        return ReturnStreamItem(type, out stream);
+    }
+
+    private static ITypeSymbol ReturnStreamItem(ITypeSymbol type, out bool stream)
+    {
+        if (type is INamedTypeSymbol named)
+        {
+            var enumerable = new[] { named }.Concat(named.AllInterfaces).FirstOrDefault(candidate =>
+                candidate.OriginalDefinition.ToDisplayString() == "System.Collections.Generic.IAsyncEnumerable<T>");
+            if (enumerable is not null)
+            {
+                stream = true;
+                return enumerable.TypeArguments[0];
+            }
+
+            for (var current = named; current is not null; current = current.BaseType)
+            {
+                if (current.OriginalDefinition.ToDisplayString() == "System.Threading.Channels.ChannelReader<T>")
+                {
+                    stream = true;
+                    return current.TypeArguments[0];
+                }
+            }
+        }
+
+        stream = false;
+        return type;
     }
 
     private static ITypeSymbol StreamItem(ITypeSymbol type, out bool stream)

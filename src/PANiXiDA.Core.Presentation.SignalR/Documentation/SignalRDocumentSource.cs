@@ -2,6 +2,8 @@ using System.Text.Json.Nodes;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Connections;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
@@ -45,12 +47,12 @@ internal sealed class SignalRDocumentSource(
             cancellationToken.ThrowIfCancellationRequested();
             var options = hub.Description.Options(services);
             var context = new HubContext(hub.Path, IsAuthorized(hub.HubType, hub.Path, endpoints),
-                SupportedProtocols(options), !options.DisableImplicitFromServicesParameters);
+                SupportedProtocols(options, hub.ConnectionOptions.Transports), !options.DisableImplicitFromServicesParameters, hub.ConnectionOptions.Transports);
             foreach (var method in hub.Description.Methods)
             {
                 var parameters = method.Parameters.Where(parameter => IsSerialized(parameter, method, context, serviceTypes)).ToArray();
                 var id = hub.HubType.FullName + "." + (method.IsClientMethod ? "client." : "hub.") + method.Name + "@" + hub.Path;
-                operations.AddRange(CreateUploads(id, hub.Path, method, parameters));
+                operations.AddRange(CreateUploads(id, context, method, parameters));
                 operations.Add(CreateInvocation(id, context, method, parameters));
             }
         }
@@ -66,10 +68,11 @@ internal sealed class SignalRDocumentSource(
             endpoint.Metadata.GetMetadata<IAllowAnonymous>() is null;
     }
 
-    private JsonArray SupportedProtocols(HubOptions options)
+    private JsonArray SupportedProtocols(HubOptions options, HttpTransportType transports)
     {
         return new JsonArray([.. services.GetRequiredService<IHubProtocolResolver>().AllProtocols
-            .Where(protocol => options.SupportedProtocols is null || options.SupportedProtocols.Contains(protocol.Name, StringComparer.OrdinalIgnoreCase))
+            .Where(protocol => (options.SupportedProtocols is null || options.SupportedProtocols.Contains(protocol.Name, StringComparer.OrdinalIgnoreCase)) &&
+                (protocol.TransferFormat != TransferFormat.Binary || (transports & (HttpTransportType.WebSockets | HttpTransportType.LongPolling)) != 0))
             .Select(protocol => (JsonNode)JsonValue.Create(protocol.Name)!)]);
     }
 
@@ -77,14 +80,14 @@ internal sealed class SignalRDocumentSource(
         HubContext context, IServiceProviderIsService? serviceTypes) => method.IsClientMethod || parameter.IsStream ||
         !context.ImplicitServices || !parameter.AllowImplicitServices || serviceTypes?.IsService(GetServiceType(parameter.Type)) != true;
 
-    private IEnumerable<AsyncApiOperation> CreateUploads(string id, string path, HubMethodDescription method,
+    private IEnumerable<AsyncApiOperation> CreateUploads(string id, HubContext context, HubMethodDescription method,
         HubParameterDescription[] parameters)
     {
         return parameters.Where(parameter => parameter.IsStream).Select(parameter =>
         {
             var streamId = id + ".upload." + parameter.Name;
-            return new AsyncApiOperation(streamId, path, AsyncApiAction.Receive,
-                new AsyncApiMessage(streamId, CreateReplySchema(parameter.Type, true)), "ws")
+            return new AsyncApiOperation(streamId, context.Path, AsyncApiAction.Receive,
+                new AsyncApiMessage(streamId, CreateReplySchema(parameter.Type, true)), context.WireProtocol)
             {
                 Bindings = new JsonObject
                 {
@@ -92,7 +95,10 @@ internal sealed class SignalRDocumentSource(
                     {
                         ["target"] = method.Name,
                         ["parameter"] = parameter.Name,
-                        ["messageType"] = "streamItem"
+                        ["messageType"] = "streamItem",
+                        ["authorizationRequired"] = context.Authorized || method.RequiresAuthorization,
+                        ["transports"] = TransportNames(context.Transports),
+                        ["transportProtocol"] = context.WireProtocol
                     }
                 }
             };
@@ -110,10 +116,12 @@ internal sealed class SignalRDocumentSource(
             ["streamResult"] = method.IsStream,
             ["authorizationRequired"] = !method.IsClientMethod && (context.Authorized || method.RequiresAuthorization),
             ["inputStreams"] = streamNames,
-            ["protocols"] = context.Protocols.DeepClone()
+            ["protocols"] = context.Protocols.DeepClone(),
+            ["transports"] = TransportNames(context.Transports),
+            ["transportProtocol"] = context.WireProtocol
         };
         return new AsyncApiOperation(id, context.Path, method.IsClientMethod ? AsyncApiAction.Send : AsyncApiAction.Receive,
-            new AsyncApiMessage(id, InvocationSchema(method, parameters, streamNames.Count)), "ws", method.Summary)
+            new AsyncApiMessage(id, InvocationSchema(method, parameters, streamNames.Count)), context.WireProtocol, method.Summary)
         {
             Bindings = new JsonObject { ["x-signalr"] = binding },
             Reply = !method.IsClientMethod || method.ResultType is not null
@@ -177,7 +185,12 @@ internal sealed class SignalRDocumentSource(
                 schemas.GetSchema(resultType, "#/oneOf/0/properties/" + property)));
         }
 
-        if (stream || resultType is null)
+        if (resultType is null && !stream)
+        {
+            alternatives.Add((JsonNode)ProtocolMessage(3, "result", new JsonObject { ["type"] = "null" }));
+        }
+
+        if (stream)
         {
             alternatives.Add((JsonNode)ProtocolMessage(3));
         }
@@ -210,5 +223,15 @@ internal sealed class SignalRDocumentSource(
         };
     }
 
-    private sealed record HubContext(string Path, bool Authorized, JsonArray Protocols, bool ImplicitServices);
+    private static JsonArray TransportNames(HttpTransportType transports)
+    {
+        HttpTransportType[] candidates = [HttpTransportType.WebSockets, HttpTransportType.ServerSentEvents, HttpTransportType.LongPolling];
+        return new JsonArray([.. candidates.Where(transport => (transports & transport) != 0)
+            .Select(transport => (JsonNode)JsonValue.Create(transport.ToString())!)]);
+    }
+
+    private sealed record HubContext(string Path, bool Authorized, JsonArray Protocols, bool ImplicitServices, HttpTransportType Transports)
+    {
+        internal string WireProtocol => (Transports & HttpTransportType.WebSockets) != 0 ? "ws" : "http";
+    }
 }

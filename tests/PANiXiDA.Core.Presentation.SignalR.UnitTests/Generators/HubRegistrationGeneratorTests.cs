@@ -230,7 +230,9 @@ public sealed class HubRegistrationGeneratorTests
             using System.Threading.Tasks;
             using System.Threading.Channels;
             using System.Collections.Generic;
-            public interface IClient { Task Changed([Microsoft.AspNetCore.Mvc.FromServices] string state); Task<int> Prompt(); }
+            public sealed class Sequence : IAsyncEnumerable<string> { public IAsyncEnumerator<string> GetAsyncEnumerator(System.Threading.CancellationToken token = default) => null!; }
+            public abstract class DerivedReader : ChannelReader<string> { }
+            public interface IClient { Task Changed([Microsoft.AspNetCore.Mvc.FromServices] string state, System.Threading.CancellationToken cancellationToken); Task<int> Prompt(); Task NonTrailing(System.Threading.CancellationToken token, int value); }
             public abstract class Parent : Hub<IClient>
             {
                 [Microsoft.AspNetCore.Authorization.Authorize]
@@ -252,6 +254,9 @@ public sealed class HubRegistrationGeneratorTests
                 public void Decorated([System.Runtime.InteropServices.Optional] string value) { }
                 public dynamic Echo(dynamic value) => value;
                 public List<string> Values(List<string> values) => values;
+                public Sequence CustomStream() => new();
+                public Task<DerivedReader> DerivedStream() => Task.FromResult<DerivedReader>(null!);
+                public void TokenAsData(System.Threading.CancellationToken token, int value) { }
                 public int Dispose(int value) => value;
                 protected void Hidden() { }
                 public static void Static() { }
@@ -265,6 +270,8 @@ public sealed class HubRegistrationGeneratorTests
         generated.ShouldContain("\"inherited\"");
         generated.ShouldContain("requiresAuthorization: true");
         generated.ShouldContain("typeof(global::System.Object)");
+        generated.ShouldNotContain("typeof(global::Sequence)");
+        generated.ShouldNotContain("typeof(global::DerivedReader)");
         generated.ShouldNotContain("HubParameterDescription(\"service\"");
         generated.ShouldNotContain("\"Hidden\"");
         generated.ShouldNotContain("\"Static\"");
