@@ -30,5 +30,11 @@ if (JsonNode.Parse(document)?["operations"]?.AsObject().Count != 1)
     throw new InvalidOperationException("Generated SignalR contracts were not available in Native AOT.");
 }
 
+var operation = JsonNode.Parse(document)!["operations"]!.AsObject().Single().Value!;
+if (operation["title"]!.GetValue<string>() != "Echo payload" || operation["summary"]!.GetValue<string>() != "Contract summary")
+{
+    throw new InvalidOperationException("Operation metadata precedence was not preserved in Native AOT.");
+}
+
 Console.WriteLine(document);
 await app.StopAsync();

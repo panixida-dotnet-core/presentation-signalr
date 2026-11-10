@@ -52,7 +52,12 @@ public sealed class HubMapBuilder
             configureOptions?.Invoke(options);
             connectionOptions = options;
         });
-        _endpoints.ServiceProvider.GetService<MappedHubDocumentation>()?.Add(typeof(THub), normalizedPath, connectionOptions!);
+        var documentation = _endpoints.ServiceProvider.GetService<MappedHubDocumentation>();
+        if (documentation is not null)
+        {
+            documentation.Endpoints ??= () => [.. _endpoints.DataSources.SelectMany(source => source.Endpoints)];
+            documentation.Add(typeof(THub), normalizedPath, connectionOptions!);
+        }
         return mapped;
     }
 

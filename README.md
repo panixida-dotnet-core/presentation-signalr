@@ -359,27 +359,50 @@ tests/
 
 ## AsyncAPI documentation
 
-Mark a hub (or its assembly) with the shared module/version metadata:
+Implement `IDocumentedHubEndpoint` instead of applying attributes to the hub:
 
 ```csharp
+using Asp.Versioning;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.SignalR;
 using PANiXiDA.Core.ApiDocumentation;
+using PANiXiDA.Core.Presentation.SignalR.Hubs;
 
-[ApiContract("matchmaking", "1.0", Title = "Matchmaking")]
-public sealed class MatchmakingHub : Hub, IHubEndpoint
+public sealed class MatchmakingHub : Hub, IDocumentedHubEndpoint
 {
-    public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) =>
-        hubs.MapHub<MatchmakingHub>("/hubs/v1/matchmaking").RequireAuthorization();
+    public static string Name => "matchmaking";
+    public static string Summary => "Matchmaking";
+    public static ApiVersion ApiVersion => new(1, 0);
+    public static IReadOnlyDictionary<string, ApiOperationMetadata> Operations { get; } =
+        new Dictionary<string, ApiOperationMetadata>
+        {
+            [nameof(GetState)] = new(Name: "GetSearchState")
+        };
 
-    /// <summary>Returns current search state.</summary>
+    public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) =>
+        hubs.MapHub<MatchmakingHub>("/hubs/v1/matchmaking")
+            .RequireAuthorization()
+            .WithOperation(nameof(GetState), summary: "Returns the current search state.");
+
+    [EndpointName("ReadSearchState")]
+    [EndpointSummary("Reads search state by identifier.")]
     public Task<SearchState> GetState(Guid searchId) => Task.FromResult(new SearchState(searchId));
 }
+
+public sealed record SearchState(Guid SearchId);
 ```
 
-The example assumes an application DTO such as `public sealed record SearchState(Guid SearchId);`.
+`Name` identifies the module; `Summary` supplies its display title. `ApiVersion` comes from `Asp.Versioning.Abstractions`. `IsDeprecated` defaults to false. Existing `IHubEndpoint` implementations remain valid without documentation.
 
-The generator discovers public hub methods, inherited methods, `HubMethodName` targets, typed `Hub<TClient>` callbacks, `Task`/`ValueTask` results, and `IAsyncEnumerable<T>`/`ChannelReader<T>` streams. XML summaries are extracted at compile time. DI parameters, streaming cancellation tokens and trailing typed-callback cancellation tokens are excluded from serialized arguments. Return streams include implemented interfaces and inherited channel readers. Overloaded targets or generic methods produce a build diagnostic for documented hubs.
+Operation names and summaries are resolved independently, in this order: Map builder overrides, `Operations`, standard `EndpointName`/`EndpointSummary` attributes, XML summary and CLR method name. `Operations` defaults to empty. Null summaries inherit lower-priority descriptions; an empty string clears them. Entries use CLR method names through `nameof`, even when `HubMethodName` changes the wire target. Display names never change client calls or stable document IDs.
 
-Register source-generated JSON metadata for every argument, result and stream item, then use the independent presenter in the host:
+Typed callbacks use `client.MethodName` keys in `Operations` and `WithClientOperation(nameof(IClient.MethodName), name: ..., summary: ...)` in Map. Unknown method/callback names fail explicitly. Dictionaries are snapshotted per hub; builder overrides belong to the mapped path.
+
+The generator discovers inherited methods, async results, typed callbacks and both streaming directions without runtime reflection discovery. DI parameters, streaming cancellation tokens and trailing callback cancellation tokens are excluded. Unsupported method signatures or duplicate targets produce a build diagnostic.
+
+Register generated JSON metadata for arguments, results and stream items, then connect the independent presenter:
 
 ```csharp
 builder.Services.AddSignalR(builder.Configuration);
@@ -389,51 +412,8 @@ app.UseSignalR(typeof(MatchmakingHub).Assembly);
 app.UseApiDocumentation();
 ```
 
-The last two calls require `PANiXiDA.Core.Presentation.Scalar.DependencyInjection` and the existing SignalR dependency injection namespace. `ApplicationJsonContext` is an application-owned `[JsonSerializable]` context. It supplies schemas; configure the same contracts for SignalR JSON serialization and MessagePack shapes as usual. Missing schema metadata fails explicitly without reflection fallback.
+The host uses the SignalR and `PANiXiDA.Core.Presentation.Scalar.DependencyInjection` namespaces. `ApplicationJsonContext` is an application-owned `[JsonSerializable]` context; configure SignalR JSON resolvers and MessagePack shapes for the same payloads as usual. Missing schema metadata fails without reflection fallback.
 
-`/asyncapi/matchmaking-signalr-v1.json` contains the hub's actual mapped path, invocation arguments, return values, callbacks and stream items. `x-signalr` bindings identify targets, streams, enabled protocols, mapped transports and authorization requirements. JSON invocation, completion and stream-item envelopes include generated DTO schemas; completion errors remain strings. MessagePack uses the same application payload types with its binary protocol encoding. Errors still use SignalR completion errors and `HubException`.
+`/asyncapi/matchmaking-signalr-v1.json` contains actual paths, arguments, replies, callbacks and streams. `x-signalr` bindings report targets, protocols, mapped transports and authorization. JSON envelopes contain generated payload schemas; completion errors remain strings. MessagePack uses its binary protocol encoding. Untyped `Clients.SendAsync` calls require a custom document source because their runtime target strings cannot be inferred reliably.
 
-Each module/version gets a separate document. Use separate hub types/routes for independently deployed versions; `ApiContract` documents versioning and does not rewrite routes or negotiate versions. Unmarked hubs keep their existing behavior and do not produce documents. Untyped `Clients.SendAsync` target names cannot be inferred statically; use an explicit document source for such notifications.
-
-Native AOT documentation uses generated hub metadata and JSON contexts. The local Native AOT smoke check publishes and runs a real Kestrel host with a plain `Hub`. ASP.NET Core's `Hub<TClient>` proxy generation and value-type upload streams retain their platform AOT restrictions; documenting typed callbacks does not remove those restrictions.
-
-## Development
-
-```bash
-dotnet restore
-dotnet format
-dotnet build --configuration Release
-dotnet test --configuration Release
-dotnet pack --configuration Release
-```
-
-Hosting tests start Kestrel on `127.0.0.1` with an OS-assigned port and use real
-HTTP, WebSocket and Long Polling connections. Authentication uses a test handler.
-Integration tests start an isolated Redis container with Testcontainers and clean
-it up afterwards. They exercise delivery between independent application hosts.
-To run only the tests that do not require Docker:
-
-```bash
-dotnet test --project tests/PANiXiDA.Core.Presentation.SignalR.UnitTests/PANiXiDA.Core.Presentation.SignalR.UnitTests.csproj --configuration Release
-```
-
-### Continuous integration
-
-Every pull request and push to `main` runs formatting, tests, and mandatory
-SonarQube analysis. Publishing starts only after formatting, tests and the
-SonarQube Quality Gate succeed. Versioning uses Nerdbank.GitVersioning and tracks
-package source, shared build settings, README and icon.
-
-## Package Contents
-
-The NuGet package includes the `net10.0` library, its `netstandard2.0` source
-generator under `analyzers/dotnet/cs`, XML documentation, README,
-license metadata, icon and repository metadata. Redis integration,
-`PANiXiDA.Core.ResultPattern`, and `Nerdbank.MessagePack.SignalR` are runtime
-package dependencies. PolyType supplies the MessagePack type shape generator;
-Microsoft's SignalR Client, MessagePack protocol, and Testcontainers are test-only.
-A symbols package is produced by the repository's packaging settings.
-
-## License
-
-Licensed under Apache-2.0. See [LICENSE](LICENSE).
+Versions describe documents; routes and transport negotiation remain application-owned. The local Native AOT smoke check verifies interface metadata, attributes, Operations and Map precedence in a real Kestrel host with a plain `Hub`. ASP.NET Core restrictions for `Hub<TClient>` and value-type upload streams remain. No separate AOT CI job is required.

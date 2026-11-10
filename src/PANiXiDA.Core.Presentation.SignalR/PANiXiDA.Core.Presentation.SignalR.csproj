@@ -20,6 +20,7 @@
 
     <ItemGroup>
         <FrameworkReference Include="Microsoft.AspNetCore.App" />
+        <PackageReference Include="Asp.Versioning.Abstractions" />
         <PackageReference Include="Nerdbank.MessagePack.SignalR" />
         <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" />
         <PackageReference Include="PANiXiDA.Core.ResultPattern" />

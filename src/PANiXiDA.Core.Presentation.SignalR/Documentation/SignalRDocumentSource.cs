@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 using PANiXiDA.Core.ApiDocumentation;
 using PANiXiDA.Core.ApiDocumentation.AsyncApi;
+using PANiXiDA.Core.Presentation.SignalR.Hubs;
 
 namespace PANiXiDA.Core.Presentation.SignalR.Documentation;
 
@@ -41,31 +42,62 @@ internal sealed class SignalRDocumentSource(
             ?? throw new ArgumentException($"SignalR document '{documentName}' was not found.", nameof(documentName));
         var operations = new List<AsyncApiOperation>();
         var serviceTypes = services.GetService<IServiceProviderIsService>();
-        var endpoints = services.GetRequiredService<EndpointDataSource>().Endpoints;
+        var endpoints = mappings.Endpoints?.Invoke() ?? services.GetRequiredService<EndpointDataSource>().Endpoints;
         foreach (var hub in mappings.Hubs.Where(hub => hub.Description.Document.Name == documentName))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var options = hub.Description.Options(services);
-            var context = new HubContext(hub.Path, IsAuthorized(hub.HubType, hub.Path, endpoints),
+            var endpoint = endpoints.OfType<RouteEndpoint>().FirstOrDefault(candidate =>
+                candidate.Metadata.GetMetadata<HubMetadata>()?.HubType == hub.HubType && candidate.RoutePattern.RawText == hub.Path);
+            var overrides = endpoint?.Metadata.GetOrderedMetadata<HubOperationOverride>() ?? [];
+            ValidateOverrides(hub.Description, overrides);
+            var context = new HubContext(hub.Path, IsAuthorized(endpoint),
                 SupportedProtocols(options, hub.ConnectionOptions.Transports), !options.DisableImplicitFromServicesParameters, hub.ConnectionOptions.Transports);
             foreach (var method in hub.Description.Methods)
             {
                 var parameters = method.Parameters.Where(parameter => IsSerialized(parameter, method, context, serviceTypes)).ToArray();
                 var id = hub.HubType.FullName + "." + (method.IsClientMethod ? "client." : "hub.") + method.Name + "@" + hub.Path;
-                operations.AddRange(CreateUploads(id, context, method, parameters));
-                operations.Add(CreateInvocation(id, context, method, parameters));
+                var documentation = ResolveMetadata(hub.Description, method, overrides);
+                operations.AddRange(CreateUploads(id, context, method, parameters, documentation));
+                operations.Add(CreateInvocation(id, context, method, parameters, documentation));
             }
         }
 
         return AsyncApiDocumentBuilder.Build(descriptor, operations);
     }
 
-    private static bool IsAuthorized(Type hubType, string path, IReadOnlyList<Endpoint> endpoints)
+    private static bool IsAuthorized(Endpoint? endpoint)
     {
-        var endpoint = endpoints.OfType<RouteEndpoint>().FirstOrDefault(endpoint =>
-            endpoint.Metadata.GetMetadata<HubMetadata>()?.HubType == hubType && endpoint.RoutePattern.RawText == path);
         return endpoint?.Metadata.GetOrderedMetadata<IAuthorizeData>().Count > 0 &&
             endpoint.Metadata.GetMetadata<IAllowAnonymous>() is null;
+    }
+
+    private static void ValidateOverrides(HubDescription hub, IReadOnlyList<HubOperationOverride> overrides)
+    {
+        foreach (var operation in overrides)
+        {
+            if (!hub.Methods.Any(method => method.MemberName == operation.MemberName && method.IsClientMethod == operation.IsClientMethod))
+            {
+                throw new InvalidOperationException($"Operation '{operation.MemberName}' does not identify a generated hub method or typed client callback.");
+            }
+        }
+    }
+
+    private static ApiOperationMetadata ResolveMetadata(HubDescription hub, HubMethodDescription method,
+        IReadOnlyList<HubOperationOverride> overrides)
+    {
+        var metadata = method.Documentation ?? new ApiOperationMetadata(method.MemberName, method.Summary);
+        if (hub.Operations.TryGetValue((method.IsClientMethod ? "client." : string.Empty) + method.MemberName, out var configured))
+        {
+            metadata = new ApiOperationMetadata(configured.Name, configured.Summary ?? metadata.Summary);
+        }
+
+        foreach (var operation in overrides.Where(operation => operation.MemberName == method.MemberName && operation.IsClientMethod == method.IsClientMethod))
+        {
+            metadata = new ApiOperationMetadata(operation.Name ?? metadata.Name, operation.Summary ?? metadata.Summary);
+        }
+
+        return metadata;
     }
 
     private JsonArray SupportedProtocols(HubOptions options, HttpTransportType transports)
@@ -81,7 +113,7 @@ internal sealed class SignalRDocumentSource(
         !context.ImplicitServices || !parameter.AllowImplicitServices || serviceTypes?.IsService(GetServiceType(parameter.Type)) != true;
 
     private IEnumerable<AsyncApiOperation> CreateUploads(string id, HubContext context, HubMethodDescription method,
-        HubParameterDescription[] parameters)
+        HubParameterDescription[] parameters, ApiOperationMetadata documentation)
     {
         return parameters.Where(parameter => parameter.IsStream).Select(parameter =>
         {
@@ -89,6 +121,7 @@ internal sealed class SignalRDocumentSource(
             return new AsyncApiOperation(streamId, context.Path, AsyncApiAction.Receive,
                 new AsyncApiMessage(streamId, CreateReplySchema(parameter.Type, true)), context.WireProtocol)
             {
+                Name = documentation.Name + " / " + parameter.Name,
                 Bindings = new JsonObject
                 {
                     ["x-signalr"] = new JsonObject
@@ -106,7 +139,7 @@ internal sealed class SignalRDocumentSource(
     }
 
     private AsyncApiOperation CreateInvocation(string id, HubContext context, HubMethodDescription method,
-        HubParameterDescription[] parameters)
+        HubParameterDescription[] parameters, ApiOperationMetadata documentation)
     {
         var streamNames = new JsonArray([.. parameters.Where(parameter => parameter.IsStream)
             .Select(parameter => (JsonNode)JsonValue.Create(parameter.Name)!)]);
@@ -121,8 +154,9 @@ internal sealed class SignalRDocumentSource(
             ["transportProtocol"] = context.WireProtocol
         };
         return new AsyncApiOperation(id, context.Path, method.IsClientMethod ? AsyncApiAction.Send : AsyncApiAction.Receive,
-            new AsyncApiMessage(id, InvocationSchema(method, parameters, streamNames.Count)), context.WireProtocol, method.Summary)
+            new AsyncApiMessage(id, InvocationSchema(method, parameters, streamNames.Count)), context.WireProtocol, documentation.Summary)
         {
+            Name = documentation.Name,
             Bindings = new JsonObject { ["x-signalr"] = binding },
             Reply = !method.IsClientMethod || method.ResultType is not null
                 ? new AsyncApiMessage(id + ".result", CreateReplySchema(method.ResultType, method.IsStream)) : null

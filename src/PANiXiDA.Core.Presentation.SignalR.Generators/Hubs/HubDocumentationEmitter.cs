@@ -8,14 +8,18 @@ namespace PANiXiDA.Core.Presentation.SignalR.Generators.Hubs;
 
 internal static class HubDocumentationEmitter
 {
-    private const string ContractName = "PANiXiDA.Core.ApiDocumentation.ApiContractAttribute";
+    private const string ContractName = "PANiXiDA.Core.Presentation.SignalR.Hubs.IDocumentedHubEndpoint";
     private const string Metadata = "global::PANiXiDA.Core.Presentation.SignalR.Documentation.";
     private static readonly DiagnosticDescriptor UnsupportedMethod = new(
         "PANSIGNALRSG003", "Documented hub methods must have unique targets and closed payload types",
         "Hub method '{0}' has a duplicate target, generic parameters or unsupported payload types",
         "HubRegistration", DiagnosticSeverity.Error, true);
+    private static readonly DiagnosticDescriptor InvalidOperationName = new(
+        "PANSIGNALRSG004", "Operation display names must not be empty",
+        "Hub method '{0}' declares an empty EndpointName",
+        "HubRegistration", DiagnosticSeverity.Error, true);
 
-    internal static bool HasContract(INamedTypeSymbol hub) => Contract(hub) is not null;
+    internal static bool HasContract(INamedTypeSymbol hub) => hub.AllInterfaces.Any(type => type.ToDisplayString() == ContractName);
 
     internal static string Build(IEnumerable<INamedTypeSymbol> hubs, SourceProductionContext context)
     {
@@ -26,6 +30,12 @@ internal static class HubDocumentationEmitter
             var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in HubMethods(hub))
             {
+                if (AttributeValue(entry.Method, "Microsoft.AspNetCore.Routing.EndpointNameAttribute") is { } name && string.IsNullOrWhiteSpace(name))
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(InvalidOperationName, entry.Method.Locations[0], entry.Method.ToDisplayString()));
+                    continue;
+                }
+
                 var target = Target(entry.Method);
                 if (!targets.Add((entry.Client ? "client:" : "hub:") + target) || !IsSupported(entry.Method, entry.Client))
                 {
@@ -36,7 +46,7 @@ internal static class HubDocumentationEmitter
                 AppendMethod(result, entry.Method, target, entry.Client);
             }
 
-            result.AppendLine(");");
+            result.AppendLine("            });");
         }
 
         return result.ToString();
@@ -44,19 +54,9 @@ internal static class HubDocumentationEmitter
 
     private static void AppendRegistration(StringBuilder result, INamedTypeSymbol hub)
     {
-        var contract = Contract(hub)!;
-        var module = (string)contract.ConstructorArguments[0].Value!;
-        var version = (string)contract.ConstructorArguments[1].Value!;
-        var title = contract.NamedArguments.FirstOrDefault(argument => argument.Key == "Title").Value.Value as string ?? module;
-        var deprecated = contract.NamedArguments.FirstOrDefault(argument => argument.Key == "Deprecated").Value.Value is true;
         result.Append("        ").Append(Metadata).Append("HubDocumentationRegistry.RegisterHub<")
             .Append(TypeName(hub)).AppendLine(">(")
-            .Append("            new global::PANiXiDA.Core.ApiDocumentation.ApiDocumentDescriptor(")
-            .Append("global::PANiXiDA.Core.ApiDocumentation.ApiDocumentNames.Create(")
-            .Append(Literal(module)).Append(", \"signalr\", ").Append(Literal(version)).Append("), ")
-            .Append(Literal(title + " SignalR v" + version)).Append(", ").Append(Literal(module)).Append(", ").Append(Literal(version))
-            .Append(", global::PANiXiDA.Core.ApiDocumentation.ApiDocumentFormat.AsyncApi, deprecated: ")
-            .Append(deprecated ? "true" : "false").Append(')');
+            .Append("            new ").Append(Metadata).AppendLine("HubMethodDescription[] {");
     }
 
     private static IEnumerable<(IMethodSymbol Method, bool Client)> HubMethods(INamedTypeSymbol hub)
@@ -106,7 +106,7 @@ internal static class HubDocumentationEmitter
     {
         var returnType = Unwrap(method.ReturnType, out var resultStream);
         var parameters = method.Parameters.Where(parameter => ShouldSerialize(parameter, resultStream, client));
-        result.AppendLine(",").Append("            new ").Append(Metadata).Append("HubMethodDescription(")
+        result.Append("            new ").Append(Metadata).Append("HubMethodDescription(")
             .Append(Literal(target)).Append(", new ").Append(Metadata).AppendLine("HubParameterDescription[] {");
         foreach (var parameter in parameters)
         {
@@ -117,7 +117,11 @@ internal static class HubDocumentationEmitter
             .Append(", isClientMethod: ").Append(client ? "true" : "false")
             .Append(", isStream: ").Append(resultStream ? "true" : "false")
             .Append(", summary: ").Append(Literal(Summary(method)))
-            .Append(", requiresAuthorization: ").Append(HasMetadata(method, "Microsoft.AspNetCore.Authorization.IAuthorizeData") ? "true" : "false").Append(')');
+            .Append(", requiresAuthorization: ").Append(HasMetadata(method, "Microsoft.AspNetCore.Authorization.IAuthorizeData") ? "true" : "false").AppendLine(") {")
+            .Append("                MemberName = ").Append(Literal(method.Name)).AppendLine(",")
+            .Append("                Documentation = new global::PANiXiDA.Core.ApiDocumentation.ApiOperationMetadata(")
+            .Append(Literal(AttributeValue(method, "Microsoft.AspNetCore.Routing.EndpointNameAttribute") ?? method.Name)).Append(", ")
+            .Append(Literal(AttributeValue(method, "Microsoft.AspNetCore.Http.EndpointSummaryAttribute") ?? Summary(method))).AppendLine(") },");
     }
 
     private static void AppendParameter(StringBuilder result, IParameterSymbol parameter)
@@ -160,8 +164,11 @@ internal static class HubDocumentationEmitter
     }
 
     private static string AttributeName(AttributeData attribute) => attribute.AttributeConstructor?.ContainingType.ToDisplayString() ?? string.Empty;
-    private static AttributeData? Contract(INamedTypeSymbol hub) => hub.GetAttributes()
-        .Concat(hub.ContainingAssembly.GetAttributes()).FirstOrDefault(attribute => AttributeName(attribute) == ContractName);
+    private static string? AttributeValue(IMethodSymbol method, string attributeName)
+    {
+        var attribute = method.GetAttributes().FirstOrDefault(item => AttributeName(item) == attributeName);
+        return attribute?.ConstructorArguments.FirstOrDefault().Value as string;
+    }
 
     private static IEnumerable<IMethodSymbol> Methods(INamedTypeSymbol type)
     {

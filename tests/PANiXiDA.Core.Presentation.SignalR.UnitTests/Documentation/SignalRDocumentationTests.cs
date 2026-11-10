@@ -2,6 +2,8 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
 
+using Asp.Versioning;
+
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -121,8 +123,8 @@ public sealed class SignalRDocumentationTests
         var mappings = app.Services.GetRequiredService<MappedHubDocumentation>();
         var first = new ApiDocumentDescriptor("module-signalr-v1", "Title", "module", "1.0", ApiDocumentFormat.AsyncApi);
         var second = new ApiDocumentDescriptor("module-signalr-v1", title, module, version, ApiDocumentFormat.AsyncApi, deprecated: deprecated);
-        mappings.Hubs.Add(new(typeof(PlainHub), "/first", new HubDescription(first, [], _ => new HubOptions()), new()));
-        mappings.Hubs.Add(new(typeof(PlainHub), "/second", new HubDescription(second, [], _ => new HubOptions()), new()));
+        mappings.Hubs.Add(new(typeof(PlainHub), "/first", new HubDescription(first, [], _ => new HubOptions(), new Dictionary<string, ApiOperationMetadata>()), new()));
+        mappings.Hubs.Add(new(typeof(PlainHub), "/second", new HubDescription(second, [], _ => new HubOptions(), new Dictionary<string, ApiOperationMetadata>()), new()));
         Should.Throw<InvalidOperationException>(() => app.Services.GetRequiredService<ApiDocumentCatalog>().GetDocuments());
     }
 
@@ -159,7 +161,7 @@ public sealed class SignalRDocumentationTests
         var descriptor = new ApiDocumentDescriptor("module-signalr-v1", "Module", "module", "1.0", ApiDocumentFormat.AsyncApi);
         var mappings = new MappedHubDocumentation();
         mappings.Hubs.Add(new(typeof(PlainHub), "/plain", new HubDescription(descriptor,
-            [new HubMethodDescription("Read", [new HubParameterDescription("id", typeof(Guid))])], _ => new HubOptions()), new()));
+            [new HubMethodDescription("Read", [new HubParameterDescription("id", typeof(Guid))])], _ => new HubOptions(), new Dictionary<string, ApiOperationMetadata>()), new()));
         var source = new SignalRDocumentSource(mappings, new ApiSchemaRegistry([DocumentationJsonContext.Default]),
             new NonIntrospectingProvider(app.Services));
         source.Generate(descriptor.Name, TestContext.Current.CancellationToken)["operations"]!.AsObject().Count.ShouldBe(1);
@@ -201,9 +203,12 @@ public sealed class SignalRDocumentationTests
     public sealed class PlainHub : Hub;
 }
 
-[ApiContract("matchmaking", "1.0", Title = "Matchmaking")]
-public sealed class DocumentationHub : Hub<IDocumentationClient>
+public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHubEndpoint
 {
+    public static string Name => "matchmaking";
+    public static string Summary => "Matchmaking";
+    public static ApiVersion ApiVersion => new(1, 0);
+
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<DocumentationHub>("/v1/state").RequireAuthorization();
 
     /// <summary>Reads current state.</summary>
@@ -218,9 +223,14 @@ public sealed class DocumentationHub : Hub<IDocumentationClient>
     private string Hidden() => "hidden";
 }
 
-[ApiContract("matchmaking", "2.0", Title = "Matchmaking", Deprecated = true)]
-public sealed class DocumentationV2Hub : Hub
+public sealed class DocumentationV2Hub : Hub, IDocumentedHubEndpoint
 {
+    public static string Name => "matchmaking";
+    public static string Summary => "Matchmaking";
+    public static ApiVersion ApiVersion => new(2, 0);
+    public static bool IsDeprecated => true;
+    public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<DocumentationV2Hub>("/v2/state");
+
     public ValueTask<DocumentationPayload> Read() => ValueTask.FromResult(new DocumentationPayload(Guid.Empty, "ready"));
 }
 

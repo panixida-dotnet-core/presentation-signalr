@@ -1,11 +1,14 @@
 using System.ComponentModel;
 
+using PANiXiDA.Core.ApiDocumentation;
+
 namespace PANiXiDA.Core.Presentation.SignalR.Documentation;
 
 /// <summary>Describes a hub method or typed client callback. Intended for generated code.</summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public sealed class HubMethodDescription
 {
+    private string _memberName;
     /// <summary>Creates a method description.</summary>
     /// <param name="name">The SignalR target name.</param>
     /// <param name="parameters">Serialized arguments.</param>
@@ -26,6 +29,7 @@ public sealed class HubMethodDescription
         }
 
         Name = name;
+        _memberName = name;
         Parameters = Array.AsReadOnly(parameters.ToArray());
         ResultType = resultType;
         IsClientMethod = isClientMethod;
@@ -36,6 +40,19 @@ public sealed class HubMethodDescription
 
     /// <summary>Gets the SignalR target name.</summary>
     public string Name { get; }
+    /// <summary>Gets or sets the CLR method name independently of its SignalR target.</summary>
+    public string MemberName
+    {
+        get => _memberName;
+        init
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(value);
+            _memberName = value;
+        }
+    }
+
+    /// <summary>Gets or sets generated display metadata, including standard endpoint attributes.</summary>
+    public ApiOperationMetadata? Documentation { get; init; }
     /// <summary>Gets the serialized arguments.</summary>
     public IReadOnlyList<HubParameterDescription> Parameters { get; }
     /// <summary>Gets the optional return or stream item type.</summary>

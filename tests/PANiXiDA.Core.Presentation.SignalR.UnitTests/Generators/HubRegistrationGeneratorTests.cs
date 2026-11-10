@@ -151,7 +151,7 @@ public sealed class HubRegistrationGeneratorTests
             app.UseSignalR(external, local, local);
 
             HubEndpoints(app).Select(endpoint => endpoint.RoutePattern.RawText)
-                .ShouldBe(["/external", "/hubs/other", "/hubs/events"]);
+                .ShouldBe(["/external", "/v1/state", "/v2/state", "/metadata", "/hubs/other", "/hubs/events"]);
         }
         finally
         {
@@ -224,9 +224,9 @@ public sealed class HubRegistrationGeneratorTests
     [Fact(DisplayName = "Documentation handles async return shapes inherited attributes callbacks arrays and dynamic payloads")]
     public void Generate_ShouldCoverStandardContractShapes()
     {
-        const string source = """
+        var source = $$"""
             using Microsoft.AspNetCore.SignalR;
-            using PANiXiDA.Core.ApiDocumentation;
+            using PANiXiDA.Core.Presentation.SignalR.Hubs;
             using System.Threading.Tasks;
             using System.Threading.Channels;
             using System.Collections.Generic;
@@ -239,9 +239,9 @@ public sealed class HubRegistrationGeneratorTests
                 [HubMethodName("inherited")]
                 public virtual Task<string> Read() => Task.FromResult("state");
             }
-            [ApiContract("module", "1.0")]
-            public class Documented : Parent
+            public class Documented : Parent, IDocumentedHubEndpoint
             {
+                {{ContractMembers("Documented")}}
                 /// <remarks>Method documentation without a summary.</remarks>
                 public override Task<string> Read() => base.Read();
                 public ValueTask Nothing() => ValueTask.CompletedTask;
@@ -262,8 +262,7 @@ public sealed class HubRegistrationGeneratorTests
                 public static void Static() { }
                 public string Property { get; set; } = "";
             }
-            [ApiContract("other", "1.0")]
-            public class UntypedClient : Hub<object> { public void Run() { } }
+            public class UntypedClient : Hub<object>, IDocumentedHubEndpoint { {{ContractMembers("UntypedClient", "other")}} public void Run() { } }
             """;
         var (result, _) = Compile(source);
         var generated = result.GeneratedTrees.Single().ToString();
@@ -282,17 +281,15 @@ public sealed class HubRegistrationGeneratorTests
     [InlineData("System.Collections.Generic.IAsyncEnumerable<string> Watch();")]
     public void Generate_ShouldRejectStreamingClientCallbacks(string method)
     {
-        Compile("public interface IClient { " + method + " } [PANiXiDA.Core.ApiDocumentation.ApiContract(\"module\", \"1.0\")] public class Documented : Microsoft.AspNetCore.SignalR.Hub<IClient> { }", "PANSIGNALRSG003");
+        Compile("public interface IClient { " + method + " } " + DocumentedSource(string.Empty, "Microsoft.AspNetCore.SignalR.Hub<IClient>"), "PANSIGNALRSG003");
     }
 
     [Fact(DisplayName = "Generator tolerates incomplete attributes without replacing compiler diagnostics")]
     public void Generate_ShouldTolerateIncompleteCode()
     {
         var (result, _) = Compile("""
-            [PANiXiDA.Core.ApiDocumentation.ApiContract]
-            public class Incomplete : Microsoft.AspNetCore.SignalR.Hub { }
-            [PANiXiDA.Core.ApiDocumentation.ApiContract("module", "1.0")]
-            public class Documented : Microsoft.AspNetCore.SignalR.Hub
+            public class Incomplete : Microsoft.AspNetCore.SignalR.Hub, PANiXiDA.Core.Presentation.SignalR.Hubs.IDocumentedHubEndpoint { }
+            public class Documented : Microsoft.AspNetCore.SignalR.Hub, PANiXiDA.Core.Presentation.SignalR.Hubs.IDocumentedHubEndpoint
             {
                 [Unknown]
                 public void Run([Unknown] string value) { }
@@ -308,17 +305,17 @@ public sealed class HubRegistrationGeneratorTests
         return builder.Build();
     }
 
-    [Fact(DisplayName = "Documentation generator reads assembly contracts inherited callbacks summaries and explicit service parameters")]
+    [Fact(DisplayName = "Documentation generator reads interface contracts inherited callbacks summaries and explicit service parameters")]
     public void Generate_ShouldDescribeDocumentedContracts()
     {
-        const string source = """
+        var source = $$"""
             using Microsoft.AspNetCore.SignalR;
-            using PANiXiDA.Core.ApiDocumentation;
-            [assembly: ApiContract("matches", "2.0", Title = "Matches", Deprecated = true)]
+            using PANiXiDA.Core.Presentation.SignalR.Hubs;
             public interface IBaseClient { System.Threading.Tasks.Task Changed(string state); }
             public interface IClient : IBaseClient { }
-            public class Documented : Hub<IClient>
+            public class Documented : Hub<IClient>, IDocumentedHubEndpoint
             {
+                {{ContractMembers("Documented", "matches", 2)}}
                 /// <summary>Reads the current state.</summary>
                 [HubMethodName("read")]
                 public System.Threading.Tasks.ValueTask<string> Read(
@@ -331,7 +328,7 @@ public sealed class HubRegistrationGeneratorTests
         var (result, _) = Compile(source);
         var generated = result.GeneratedTrees.Single().ToString();
         generated.ShouldContain("HubDocumentationRegistry.RegisterHub<global::Documented>");
-        generated.ShouldContain("\"matches\", \"signalr\", \"2.0\"");
+        generated.ShouldContain("MemberName = \"Read\"");
         generated.ShouldContain("\"read\"");
         generated.ShouldContain("isClientMethod: true");
         generated.ShouldContain("\"Changed\"");
@@ -353,9 +350,49 @@ public sealed class HubRegistrationGeneratorTests
     [InlineData("public void Read(string value) { } public void Read(int value) { }")]
     public void Generate_ShouldDiagnoseUnsupportedDocumentedMethods(string methods)
     {
-        Compile("[PANiXiDA.Core.ApiDocumentation.ApiContract(\"module\", \"1.0\")] public class Documented : Microsoft.AspNetCore.SignalR.Hub { " +
-            methods + " }", "PANSIGNALRSG003");
+        Compile(DocumentedSource(methods), "PANSIGNALRSG003");
     }
+
+    [Theory(DisplayName = "Standard endpoint attributes generate display metadata independently of wire names")]
+    [InlineData("\"Readable operation\"", "\"Readable description\"", "Readable operation", "Readable description")]
+    [InlineData("null", "null", "Read", "XML fallback")]
+    public void Generate_ShouldReadEndpointAttributes(string name, string summary, string expectedName, string expectedSummary)
+    {
+        var (result, _) = Compile(DocumentedSource($$"""
+            /// <summary>XML fallback</summary>
+            [Microsoft.AspNetCore.SignalR.HubMethodName("wire-read")]
+            [Microsoft.AspNetCore.Routing.EndpointName({{name}})]
+            [Microsoft.AspNetCore.Http.EndpointSummary({{summary}})]
+            public string Read() => "state";
+            """));
+
+        var generated = result.GeneratedTrees.Single().ToString();
+        generated.ShouldContain("HubMethodDescription(\"wire-read\"");
+        generated.ShouldContain("MemberName = \"Read\"");
+        generated.ShouldContain($"ApiOperationMetadata(\"{expectedName}\", \"{expectedSummary}\")");
+    }
+
+    [Fact(DisplayName = "Empty endpoint names produce a compile-time diagnostic")]
+    public void Generate_ShouldRejectEmptyDisplayNames()
+    {
+        Compile(DocumentedSource("""[Microsoft.AspNetCore.Routing.EndpointName(" ")] public void Read() { }"""),
+            "PANSIGNALRSG004");
+    }
+
+    private static string DocumentedSource(string methods, string baseType = "Microsoft.AspNetCore.SignalR.Hub") => $$"""
+        public class Documented : {{baseType}}, PANiXiDA.Core.Presentation.SignalR.Hubs.IDocumentedHubEndpoint
+        {
+            {{ContractMembers("Documented")}}
+            {{methods}}
+        }
+        """;
+
+    private static string ContractMembers(string typeName, string module = "module", int major = 1) => $$"""
+        public static string Name => "{{module}}";
+        public static string Summary => "{{module}}";
+        public static Asp.Versioning.ApiVersion ApiVersion => new({{major}}, 0);
+        public static Microsoft.AspNetCore.Builder.HubEndpointConventionBuilder Map(PANiXiDA.Core.Presentation.SignalR.Hubs.HubMapBuilder hubs) => hubs.MapHub<{{typeName}}>("/generated");
+        """;
 
     private static RouteEndpoint[] HubEndpoints(WebApplication app)
     {
