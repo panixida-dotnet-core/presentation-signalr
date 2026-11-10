@@ -395,7 +395,7 @@ The last two calls require `PANiXiDA.Core.Presentation.Scalar.DependencyInjectio
 
 Each module/version gets a separate document. Use separate hub types/routes for independently deployed versions; `ApiContract` documents versioning and does not rewrite routes or negotiate versions. Unmarked hubs keep their existing behavior and do not produce documents. Untyped `Clients.SendAsync` target names cannot be inferred statically; use an explicit document source for such notifications.
 
-Native AOT documentation uses generated hub metadata and JSON contexts. CI publishes and runs a real Kestrel host with a plain `Hub`. ASP.NET Core's `Hub<TClient>` proxy generation and value-type upload streams retain their platform AOT restrictions; documenting typed callbacks does not remove those restrictions.
+Native AOT documentation uses generated hub metadata and JSON contexts. The local Native AOT smoke check publishes and runs a real Kestrel host with a plain `Hub`. ASP.NET Core's `Hub<TClient>` proxy generation and value-type upload streams retain their platform AOT restrictions; documenting typed callbacks does not remove those restrictions.
 
 ## Development
 

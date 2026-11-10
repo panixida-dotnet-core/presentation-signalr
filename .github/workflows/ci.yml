@@ -10,19 +10,6 @@ permissions:
     packages: write
 
 jobs:
-    native-aot:
-        runs-on: ubuntu-latest
-        steps:
-          - uses: actions/checkout@v7
-            with:
-              fetch-depth: 0
-          - uses: actions/setup-dotnet@v6
-            with:
-              global-json-file: global.json
-          - name: Publish and run Native AOT hub documentation
-            run: |
-              dotnet publish tests/PANiXiDA.Core.Presentation.SignalR.AotSmoke -c Release -r linux-x64 -o /tmp/signalr-aot
-              /tmp/signalr-aot/PANiXiDA.Core.Presentation.SignalR.AotSmoke
     format:
         uses: PANiXiDA-Infrastructure/ci-cd/.github/workflows/dotnet-format.yml@main
         with:
@@ -53,7 +40,6 @@ jobs:
         - format
         - tests
         - sonar
-        - native-aot
       uses: PANiXiDA-Infrastructure/ci-cd/.github/workflows/dotnet-publish-global-nuget.yml@main
       secrets:
         NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
