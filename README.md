@@ -404,7 +404,7 @@ Each mapped hub path has one channel shared by invocations, callbacks, streams, 
 
 Typed callbacks use `client.MethodName` keys in `Operations` and `WithClientOperation(nameof(IClient.MethodName), name: ..., summary: ...)` in Map. Unknown method/callback names fail explicitly. Dictionaries are snapshotted per hub; builder overrides belong to the mapped path.
 
-The generator discovers inherited methods, async results, typed callbacks and both streaming directions without runtime reflection discovery. DI parameters, streaming cancellation tokens and trailing callback cancellation tokens are excluded. Unsupported method signatures or duplicate targets produce a build diagnostic.
+The generator discovers inherited methods, async results, typed callbacks and both streaming directions without runtime reflection discovery. Hub lifecycle methods are excluded; typed client callbacks named `Dispose` remain documented. DI parameters, streaming cancellation tokens and trailing callback cancellation tokens are excluded. Unsupported method signatures or duplicate targets produce a build diagnostic.
 
 Register generated JSON metadata for arguments, results and stream items, then connect the independent presenter:
 

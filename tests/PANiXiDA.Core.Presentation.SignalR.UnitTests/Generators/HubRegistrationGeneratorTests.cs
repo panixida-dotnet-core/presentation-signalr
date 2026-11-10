@@ -276,6 +276,29 @@ public sealed class HubRegistrationGeneratorTests
         generated.ShouldNotContain("\"Static\"");
     }
 
+    [Fact(DisplayName = "Inherited client disposal callbacks are documented while hub disposal stays excluded")]
+    public void Generate_ShouldPreserveClientDispose()
+    {
+        var source = $$"""
+            using Microsoft.AspNetCore.SignalR;
+            using PANiXiDA.Core.Presentation.SignalR.Hubs;
+            public interface IBaseClient { System.Threading.Tasks.Task Dispose(); }
+            public interface IClient : IBaseClient { }
+            public class Documented : Hub<IClient>, IDocumentedHubEndpoint
+            {
+                {{ContractMembers("Documented")}}
+                public new void Dispose() => base.Dispose();
+            }
+            """;
+
+        var (result, _) = Compile(source);
+
+        var generated = result.GeneratedTrees.Single().ToString();
+        generated.ShouldContain("MemberName = \"Dispose\"");
+        generated.ShouldContain("isClientMethod: true");
+        generated.ShouldNotContain("isClientMethod: false");
+    }
+
     [Theory(DisplayName = "Documented typed callbacks reject unsupported streaming signatures")]
     [InlineData("System.Threading.Tasks.Task Watch(System.Collections.Generic.IAsyncEnumerable<string> values);")]
     [InlineData("System.Collections.Generic.IAsyncEnumerable<string> Watch();")]

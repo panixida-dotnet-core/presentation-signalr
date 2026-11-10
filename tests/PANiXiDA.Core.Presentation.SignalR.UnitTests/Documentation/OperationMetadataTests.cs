@@ -49,6 +49,9 @@ public sealed class OperationMetadataTests
         var confirmation = Operation(document, "/metadata", nameof(IMetadataClient.Confirm), true);
         Message(document, confirmation)["title"]!.GetValue<string>().ShouldBe("Confirm request");
         Message(document, confirmation, reply: true)["title"]!.GetValue<string>().ShouldBe("Confirm response");
+        var dispose = Operation(document, "/metadata", nameof(IMetadataClient.Dispose), true);
+        dispose["title"]!.GetValue<string>().ShouldBe("Dispose resources");
+        Message(document, dispose)["title"]!.GetValue<string>().ShouldBe("Dispose resources notification");
     }
 
     [Fact(DisplayName = "Multiple methods and hub types share one channel per mapped path and remain isolated across modules")]
@@ -67,10 +70,10 @@ public sealed class OperationMetadataTests
 
         source.GetDocuments().Select(item => item.Name).Order().ShouldBe(["matchmaking-signalr-v2", "metadata-signalr-v1"]);
         document["channels"]!.AsObject().Select(channel => channel.Key).Order().ShouldBe(["/metadata", "/secondary"]);
-        document["operations"]!.AsObject().Count.ShouldBe(10);
+        document["operations"]!.AsObject().Count.ShouldBe(11);
         document["operations"]!.AsObject().Where(operation => operation.Key.EndsWith("@/metadata", StringComparison.Ordinal))
             .Select(operation => operation.Value!["bindings"]!["x-signalr"]!["target"]!.GetValue<string>()).Order()
-            .ShouldBe(new[] { "Changed", "ClearSummary", "Confirm", "Defaults", "OnlyAttributes", "OnlyContract", "OnlySummary", "wire-read", "XmlOnly" }.Order());
+            .ShouldBe(new[] { "Changed", "ClearSummary", "Confirm", "Defaults", "Dispose", "OnlyAttributes", "OnlyContract", "OnlySummary", "wire-read", "XmlOnly" }.Order());
         foreach (var entry in document["operations"]!.AsObject())
         {
             var operation = entry.Value!;
@@ -127,7 +130,8 @@ public sealed class OperationMetadataTests
                 .WithOperation(nameof(MetadataHub.Read), summary: "Builder summary")
                 .WithOperation(nameof(MetadataHub.Read), name: "BuilderRead")
                 .WithOperation(nameof(MetadataHub.Read), name: "FinalRead")
-                .WithClientOperation(nameof(IMetadataClient.Changed), name: "BuilderNotification");
+                .WithClientOperation(nameof(IMetadataClient.Changed), name: "BuilderNotification")
+                .WithClientOperation(nameof(IMetadataClient.Dispose), name: "BuilderDispose");
             hubs.MapHub<MetadataHub>("/clear").WithOperation(nameof(MetadataHub.Read), summary: "");
         });
         var beforeStart = Generate(app);
@@ -145,6 +149,7 @@ public sealed class OperationMetadataTests
         callback["title"]!.GetValue<string>().ShouldBe("BuilderNotification");
         callback["summary"]!.GetValue<string>().ShouldBe("Contract callback summary");
         callback["action"]!.GetValue<string>().ShouldBe("send");
+        Operation(document, "/custom", nameof(IMetadataClient.Dispose), true)["title"]!.GetValue<string>().ShouldBe("BuilderDispose");
     }
 
     [Theory(DisplayName = "Unknown method or callback overrides fail explicitly")]
@@ -259,7 +264,8 @@ public sealed class MetadataHub : Hub<IMetadataClient>, IDocumentedHubEndpoint
         [nameof(Read)] = new("ContractRead"),
         [nameof(OnlyContract)] = new("ContractOnly", "Contract summary"),
         [nameof(ClearSummary)] = new("Cleared", ""),
-        ["client." + nameof(IMetadataClient.Changed)] = new("ContractNotification", "Contract callback summary")
+        ["client." + nameof(IMetadataClient.Changed)] = new("ContractNotification", "Contract callback summary"),
+        ["client." + nameof(IMetadataClient.Dispose)] = new("Dispose resources")
     };
 
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<MetadataHub>("/metadata");
@@ -308,6 +314,8 @@ public interface IMetadataClient
     Task Changed(string value);
 
     Task<string> Confirm();
+
+    Task Dispose();
 }
 
 public abstract class ContractGuardHub : Hub, IDocumentedHubEndpoint

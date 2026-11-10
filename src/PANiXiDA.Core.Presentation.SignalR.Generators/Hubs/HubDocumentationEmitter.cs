@@ -195,7 +195,7 @@ internal static class HubDocumentationEmitter
                      .OrderBy(method => method.Name, StringComparer.Ordinal))
         {
             if (method.MethodKind != MethodKind.Ordinary || method.IsStatic || method.DeclaredAccessibility != Accessibility.Public ||
-                IsFrameworkMethod(method))
+                type.TypeKind != TypeKind.Interface && IsFrameworkMethod(method))
             {
                 continue;
             }
