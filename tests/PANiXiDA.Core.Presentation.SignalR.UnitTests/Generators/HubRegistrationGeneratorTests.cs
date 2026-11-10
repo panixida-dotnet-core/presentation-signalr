@@ -221,12 +221,133 @@ public sealed class HubRegistrationGeneratorTests
         }
     }
 
+    [Fact(DisplayName = "Documentation handles async return shapes inherited attributes callbacks arrays and dynamic payloads")]
+    public void Generate_ShouldCoverStandardContractShapes()
+    {
+        const string source = """
+            using Microsoft.AspNetCore.SignalR;
+            using PANiXiDA.Core.ApiDocumentation;
+            using System.Threading.Tasks;
+            using System.Threading.Channels;
+            using System.Collections.Generic;
+            public interface IClient { Task Changed([Microsoft.AspNetCore.Mvc.FromServices] string state); Task<int> Prompt(); }
+            public abstract class Parent : Hub<IClient>
+            {
+                [Microsoft.AspNetCore.Authorization.Authorize]
+                [HubMethodName("inherited")]
+                public virtual Task<string> Read() => Task.FromResult("state");
+            }
+            [ApiContract("module", "1.0")]
+            public class Documented : Parent
+            {
+                /// <remarks>Method documentation without a summary.</remarks>
+                public override Task<string> Read() => base.Read();
+                public ValueTask Nothing() => ValueTask.CompletedTask;
+                public ValueTask<string> Value() => new("value");
+                public Task<int[]> Array() => Task.FromResult(new[] { 1 });
+                public ChannelReader<string> Watch(System.Threading.CancellationToken cancellationToken) => Channel.CreateUnbounded<string>().Reader;
+                public IAsyncEnumerable<string> Updates() => null!;
+                public Task Upload(ChannelReader<string> items) => Task.CompletedTask;
+                public void ReadKeyed([Microsoft.Extensions.DependencyInjection.FromKeyedServices("key")] object service) { }
+                public void Decorated([System.Runtime.InteropServices.Optional] string value) { }
+                public dynamic Echo(dynamic value) => value;
+                public List<string> Values(List<string> values) => values;
+                public int Dispose(int value) => value;
+                protected void Hidden() { }
+                public static void Static() { }
+                public string Property { get; set; } = "";
+            }
+            [ApiContract("other", "1.0")]
+            public class UntypedClient : Hub<object> { public void Run() { } }
+            """;
+        var (result, _) = Compile(source);
+        var generated = result.GeneratedTrees.Single().ToString();
+        generated.ShouldContain("\"inherited\"");
+        generated.ShouldContain("requiresAuthorization: true");
+        generated.ShouldContain("typeof(global::System.Object)");
+        generated.ShouldNotContain("HubParameterDescription(\"service\"");
+        generated.ShouldNotContain("\"Hidden\"");
+        generated.ShouldNotContain("\"Static\"");
+    }
+
+    [Theory(DisplayName = "Documented typed callbacks reject unsupported streaming signatures")]
+    [InlineData("System.Threading.Tasks.Task Watch(System.Collections.Generic.IAsyncEnumerable<string> values);")]
+    [InlineData("System.Collections.Generic.IAsyncEnumerable<string> Watch();")]
+    public void Generate_ShouldRejectStreamingClientCallbacks(string method)
+    {
+        Compile("public interface IClient { " + method + " } [PANiXiDA.Core.ApiDocumentation.ApiContract(\"module\", \"1.0\")] public class Documented : Microsoft.AspNetCore.SignalR.Hub<IClient> { }", "PANSIGNALRSG003");
+    }
+
+    [Fact(DisplayName = "Generator tolerates incomplete attributes without replacing compiler diagnostics")]
+    public void Generate_ShouldTolerateIncompleteCode()
+    {
+        var (result, _) = Compile("""
+            [PANiXiDA.Core.ApiDocumentation.ApiContract]
+            public class Incomplete : Microsoft.AspNetCore.SignalR.Hub { }
+            [PANiXiDA.Core.ApiDocumentation.ApiContract("module", "1.0")]
+            public class Documented : Microsoft.AspNetCore.SignalR.Hub
+            {
+                [Unknown]
+                public void Run([Unknown] string value) { }
+            }
+            """, allowCompilationErrors: true);
+        result.Results.Single().Exception.ShouldBeNull();
+    }
     private static WebApplication CreateApplication()
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
         builder.Services.AddSignalR();
         return builder.Build();
+    }
+
+    [Fact(DisplayName = "Documentation generator reads assembly contracts inherited callbacks summaries and explicit service parameters")]
+    public void Generate_ShouldDescribeDocumentedContracts()
+    {
+        const string source = """
+            using Microsoft.AspNetCore.SignalR;
+            using PANiXiDA.Core.ApiDocumentation;
+            [assembly: ApiContract("matches", "2.0", Title = "Matches", Deprecated = true)]
+            public interface IBaseClient { System.Threading.Tasks.Task Changed(string state); }
+            public interface IClient : IBaseClient { }
+            public class Documented : Hub<IClient>
+            {
+                /// <summary>Reads the current state.</summary>
+                [HubMethodName("read")]
+                public System.Threading.Tasks.ValueTask<string> Read(
+                    string id, [Microsoft.AspNetCore.Mvc.FromServices] System.IDisposable service) => new(id);
+                public override System.Threading.Tasks.Task OnConnectedAsync() => base.OnConnectedAsync();
+                public override string ToString() => "hub";
+                private string Hidden() => "hidden";
+            }
+            """;
+        var (result, _) = Compile(source);
+        var generated = result.GeneratedTrees.Single().ToString();
+        generated.ShouldContain("HubDocumentationRegistry.RegisterHub<global::Documented>");
+        generated.ShouldContain("\"matches\", \"signalr\", \"2.0\"");
+        generated.ShouldContain("\"read\"");
+        generated.ShouldContain("isClientMethod: true");
+        generated.ShouldContain("\"Changed\"");
+        generated.ShouldNotContain("HubParameterDescription(\"service\"");
+        generated.ShouldNotContain("\"OnConnectedAsync\"");
+        generated.ShouldNotContain("\"ToString\"");
+        generated.ShouldNotContain("GetMethods(");
+    }
+
+    [Theory(DisplayName = "Documented hubs report unsupported generic methods and overloaded targets at compile time")]
+    [InlineData("public void Read<T>(T value) { }")]
+    [InlineData("public void Read(ref int value) { }")]
+    [InlineData("public unsafe void Read(int* value) { }")]
+    [InlineData("public unsafe void Read(delegate*<void> value) { }")]
+    [InlineData("public void Read(System.Span<int> value) { }")]
+    [InlineData("public System.ReadOnlySpan<int> Read() => default;")]
+    [InlineData("private int value; public ref int Read() => ref value;")]
+    [InlineData("private int value; public ref readonly int Read() => ref value;")]
+    [InlineData("public void Read(string value) { } public void Read(int value) { }")]
+    public void Generate_ShouldDiagnoseUnsupportedDocumentedMethods(string methods)
+    {
+        Compile("[PANiXiDA.Core.ApiDocumentation.ApiContract(\"module\", \"1.0\")] public class Documented : Microsoft.AspNetCore.SignalR.Hub { " +
+            methods + " }", "PANSIGNALRSG003");
     }
 
     private static RouteEndpoint[] HubEndpoints(WebApplication app)
@@ -250,7 +371,7 @@ public sealed class HubRegistrationGeneratorTests
     private static (GeneratorDriverRunResult Result, Compilation Compilation) Compile(
         string source,
         string? expectedDiagnostic = null,
-        bool includeRuntime = true)
+        bool includeRuntime = true, bool allowCompilationErrors = false)
     {
         var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
         var references = ReferencePaths
@@ -259,12 +380,15 @@ public sealed class HubRegistrationGeneratorTests
         var compilation = CSharpCompilation.Create("GeneratedHubs_" + Guid.NewGuid().ToString("N"),
             [CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: TestContext.Current.CancellationToken)],
             references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable, allowUnsafe: true));
         var driver = CSharpGeneratorDriver.Create([new HubRegistrationGenerator().AsSourceGenerator()], parseOptions: parseOptions)
             .RunGeneratorsAndUpdateCompilation(compilation, out var updated, out var diagnostics, TestContext.Current.CancellationToken);
         diagnostics.Select(diagnostic => diagnostic.Id).ShouldBe(expectedDiagnostic is null ? [] : [expectedDiagnostic]);
-        updated.GetDiagnostics(TestContext.Current.CancellationToken)
-            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        if (!allowCompilationErrors)
+        {
+            updated.GetDiagnostics(TestContext.Current.CancellationToken)
+                .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        }
         return (driver.GetRunResult(), updated);
     }
 }

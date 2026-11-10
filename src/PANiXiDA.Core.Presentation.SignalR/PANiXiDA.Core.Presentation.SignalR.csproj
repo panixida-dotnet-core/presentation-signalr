@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <IsPackable>true</IsPackable>
         <IsAotCompatible>true</IsAotCompatible>
@@ -23,6 +23,7 @@
         <PackageReference Include="Nerdbank.MessagePack.SignalR" />
         <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" />
         <PackageReference Include="PANiXiDA.Core.ResultPattern" />
+        <PackageReference Include="PANiXiDA.Core.ApiDocumentation" />
         <PackageReference Include="Nerdbank.GitVersioning">
             <PrivateAssets>all</PrivateAssets>
         </PackageReference>

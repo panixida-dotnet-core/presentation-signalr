@@ -357,6 +357,46 @@ tests/
   PANiXiDA.Core.Presentation.SignalR.IntegrationTests/
 ```
 
+## AsyncAPI documentation
+
+Mark a hub (or its assembly) with the shared module/version metadata:
+
+```csharp
+using PANiXiDA.Core.ApiDocumentation;
+
+[ApiContract("matchmaking", "1.0", Title = "Matchmaking")]
+public sealed class MatchmakingHub : Hub, IHubEndpoint
+{
+    public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) =>
+        hubs.MapHub<MatchmakingHub>("/hubs/v1/matchmaking").RequireAuthorization();
+
+    /// <summary>Returns current search state.</summary>
+    public Task<SearchState> GetState(Guid searchId) => Task.FromResult(new SearchState(searchId));
+}
+```
+
+The example assumes an application DTO such as `public sealed record SearchState(Guid SearchId);`.
+
+The generator discovers public hub methods, inherited methods, `HubMethodName` targets, typed `Hub<TClient>` callbacks, `Task`/`ValueTask` results, and `IAsyncEnumerable<T>`/`ChannelReader<T>` streams. XML summaries are extracted at compile time. DI parameters and streaming cancellation tokens are excluded from serialized arguments. Overloaded targets or generic methods produce a build diagnostic for documented hubs.
+
+Register source-generated JSON metadata for every argument, result and stream item, then use the independent presenter in the host:
+
+```csharp
+builder.Services.AddSignalR(builder.Configuration);
+builder.Services.AddApiDocumentation(builder.Configuration, ApplicationJsonContext.Default);
+var app = builder.Build();
+app.UseSignalR(typeof(MatchmakingHub).Assembly);
+app.UseApiDocumentation();
+```
+
+The last two calls require `PANiXiDA.Core.Presentation.Scalar.DependencyInjection` and the existing SignalR dependency injection namespace. `ApplicationJsonContext` is an application-owned `[JsonSerializable]` context. It supplies schemas; configure the same contracts for SignalR JSON serialization and MessagePack shapes as usual. Missing schema metadata fails explicitly without reflection fallback.
+
+`/asyncapi/matchmaking-signalr-v1.json` contains the hub's actual mapped path, invocation arguments, return values, callbacks and stream items. `x-signalr` bindings identify targets, streams, enabled protocols and authorization requirements. JSON invocation, completion and stream-item envelopes include generated DTO schemas; completion errors remain strings. MessagePack uses the same application payload types with its binary protocol encoding. Errors still use SignalR completion errors and `HubException`.
+
+Each module/version gets a separate document. Use separate hub types/routes for independently deployed versions; `ApiContract` documents versioning and does not rewrite routes or negotiate versions. Unmarked hubs keep their existing behavior and do not produce documents. Untyped `Clients.SendAsync` target names cannot be inferred statically; use an explicit document source for such notifications.
+
+Native AOT documentation uses generated hub metadata and JSON contexts. CI publishes and runs a real Kestrel host with a plain `Hub`. ASP.NET Core's `Hub<TClient>` proxy generation and value-type upload streams retain their platform AOT restrictions; documenting typed callbacks does not remove those restrictions.
+
 ## Development
 
 ```bash

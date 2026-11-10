@@ -9,6 +9,7 @@
         <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.14" />
         <PackageVersion Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="10.0.14" />
         <PackageVersion Include="Nerdbank.MessagePack.SignalR" Version="1.4.104" />
+        <PackageVersion Include="PANiXiDA.Core.ApiDocumentation" Version="[1.0.2,2.0.0)" />
         <PackageVersion Include="PANiXiDA.Core.ResultPattern" Version="1.0.4" />
         <PackageVersion Include="Testcontainers" Version="4.15.0" />
         <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.0.4" />

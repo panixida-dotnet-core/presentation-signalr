@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+    <PropertyGroup>
+        <PublishAot>true</PublishAot>
+        <RuntimeFrameworkVersion>10.0.14</RuntimeFrameworkVersion>
+        <IlcPackageVersion>10.0.14</IlcPackageVersion>
+        <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="../../src/PANiXiDA.Core.Presentation.SignalR/PANiXiDA.Core.Presentation.SignalR.csproj" />
+        <ProjectReference Include="../../src/PANiXiDA.Core.Presentation.SignalR.Generators/PANiXiDA.Core.Presentation.SignalR.Generators.csproj"
+                          OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    </ItemGroup>
+</Project>

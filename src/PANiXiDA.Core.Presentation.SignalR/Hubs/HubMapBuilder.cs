@@ -4,6 +4,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
+
+using PANiXiDA.Core.Presentation.SignalR.Documentation;
 
 namespace PANiXiDA.Core.Presentation.SignalR.Hubs;
 
@@ -43,7 +46,9 @@ public sealed class HubMapBuilder
             throw new ArgumentException("Hub paths must be unique.", nameof(path));
         }
 
-        return _endpoints.MapHub<THub>(normalizedPath, configureOptions);
+        var mapped = _endpoints.MapHub<THub>(normalizedPath, configureOptions);
+        _endpoints.ServiceProvider.GetService<MappedHubDocumentation>()?.Add(typeof(THub), normalizedPath);
+        return mapped;
     }
 
     private static bool IsValidHubPath(string? path)

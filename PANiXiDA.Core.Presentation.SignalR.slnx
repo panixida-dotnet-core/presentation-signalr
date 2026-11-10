@@ -20,6 +20,7 @@
     <Project Path="src/PANiXiDA.Core.Presentation.SignalR/PANiXiDA.Core.Presentation.SignalR.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/PANiXiDA.Core.Presentation.SignalR.AotSmoke/PANiXiDA.Core.Presentation.SignalR.AotSmoke.csproj" />
     <Project Path="tests/PANiXiDA.Core.Presentation.SignalR.IntegrationTests/PANiXiDA.Core.Presentation.SignalR.IntegrationTests.csproj" />
     <Project Path="tests/PANiXiDA.Core.Presentation.SignalR.UnitTests/PANiXiDA.Core.Presentation.SignalR.UnitTests.csproj" />
   </Folder>
