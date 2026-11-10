@@ -226,6 +226,7 @@ public sealed class OperationMetadataTests
         operations["Read"] = new ApiOperationMetadata("Changed");
         operations["client.Changed"] = new ApiOperationMetadata("Changed callback");
 
+        Should.Throw<ArgumentException>(() => HubDocumentationRegistry.RegisterHub<ContractGuardHub>(methods));
         HubDocumentationRegistry.Find(typeof(ContractGuardHub))!.Operations["Read"].Name.ShouldBe("Original");
         HubDocumentationRegistry.Find(typeof(ContractGuardHub))!.Operations["client.Changed"].Name.ShouldBe("Original callback");
         HubDocumentationRegistry.RegisterHub<LegacyGuardHub>(new ApiDocumentDescriptor(
