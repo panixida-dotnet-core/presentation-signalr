@@ -416,4 +416,4 @@ The host uses the SignalR and `PANiXiDA.Core.Presentation.Scalar.DependencyInjec
 
 `/asyncapi/matchmaking-signalr-v1.json` contains actual paths, arguments, replies, callbacks and streams. `x-signalr` bindings report targets, protocols, mapped transports and authorization. JSON envelopes contain generated payload schemas; completion errors remain strings. MessagePack uses its binary protocol encoding. Untyped `Clients.SendAsync` calls require a custom document source because their runtime target strings cannot be inferred reliably.
 
-Versions describe documents; routes and transport negotiation remain application-owned. The local Native AOT smoke check verifies interface metadata, attributes, Operations and Map precedence in a real Kestrel host with a plain `Hub`. ASP.NET Core restrictions for `Hub<TClient>` and value-type upload streams remain. No separate AOT CI job is required.
+Versions describe documents; routes and transport negotiation remain application-owned. ASP.NET Core restrictions for `Hub<TClient>` and value-type upload streams remain.
