@@ -400,6 +400,8 @@ Operation names and summaries are resolved independently, in this order: Map bui
 
 Messages and replies use the resolved operation name for display titles: `GetState request`, `GetState response`, `Watch stream`, `Upload / updates stream`, or `Changed notification`. Typed callbacks returning a value use request/response titles. Technical message names, component keys, references, and payload schemas stay unchanged.
 
+Each mapped hub path has one channel shared by invocations, callbacks, streams, and replies. Replies stay under their operation's `Replies` section. Multiple hubs with the same `Name`, `Summary`, and `ApiVersion` share a document; different paths remain separate channels and different modules or versions remain separate documents.
+
 Typed callbacks use `client.MethodName` keys in `Operations` and `WithClientOperation(nameof(IClient.MethodName), name: ..., summary: ...)` in Map. Unknown method/callback names fail explicitly. Dictionaries are snapshotted per hub; builder overrides belong to the mapped path.
 
 The generator discovers inherited methods, async results, typed callbacks and both streaming directions without runtime reflection discovery. DI parameters, streaming cancellation tokens and trailing callback cancellation tokens are excluded. Unsupported method signatures or duplicate targets produce a build diagnostic.

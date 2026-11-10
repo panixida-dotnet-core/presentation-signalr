@@ -50,9 +50,19 @@ public sealed class SignalRDocumentationTests
         var document = JsonNode.Parse(await client.GetStringAsync("/contract", TestContext.Current.CancellationToken))!;
         source.GetDocuments().Select(document => document.Name).Order().ShouldBe(["matchmaking-signalr-v1", "matchmaking-signalr-v2"]);
         document["info"]!["version"]!.GetValue<string>().ShouldBe("1.0");
+        document["channels"]!.AsObject().Count.ShouldBe(1);
         document["channels"]!["/v1/state"].ShouldNotBeNull();
         document["channels"]!["/v2/state"].ShouldBeNull();
         var operations = document["operations"]!.AsObject();
+        foreach (var operation in operations.Select(operation => operation.Value!))
+        {
+            operation["channel"]!["$ref"]!.GetValue<string>().ShouldBe("#/channels/~1v1~1state");
+            if (operation["reply"] is { } completion)
+            {
+                JsonNode.DeepEquals(operation["channel"], completion["channel"]).ShouldBeTrue();
+            }
+        }
+
         var read = operations.Single(operation => operation.Key.Contains("hub.read-state@", StringComparison.Ordinal)).Value!;
         read["summary"]!.GetValue<string>().ShouldBe("Reads current state.");
         read["bindings"]!["x-signalr"]!["authorizationRequired"]!.GetValue<bool>().ShouldBeTrue();

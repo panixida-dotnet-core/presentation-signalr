@@ -51,6 +51,45 @@ public sealed class OperationMetadataTests
         Message(document, confirmation, reply: true)["title"]!.GetValue<string>().ShouldBe("Confirm response");
     }
 
+    [Fact(DisplayName = "Multiple methods and hub types share one channel per mapped path and remain isolated across modules")]
+    public async Task GroupsMultipleHubsAndMethods()
+    {
+        await using var app = CreateApplication();
+        app.UseSignalR(hubs =>
+        {
+            hubs.MapHub<MetadataHub>("/metadata");
+            hubs.MapHub<SecondaryMetadataHub>("/secondary");
+            hubs.MapHub<DocumentationV2Hub>("/other");
+        });
+        var source = app.Services.GetServices<IApiDocumentSource>().OfType<IAsyncApiDocumentSource>().Single();
+
+        var document = source.Generate("metadata-signalr-v1", TestContext.Current.CancellationToken);
+
+        source.GetDocuments().Select(item => item.Name).Order().ShouldBe(["matchmaking-signalr-v2", "metadata-signalr-v1"]);
+        document["channels"]!.AsObject().Select(channel => channel.Key).Order().ShouldBe(["/metadata", "/secondary"]);
+        document["operations"]!.AsObject().Count.ShouldBe(10);
+        document["operations"]!.AsObject().Where(operation => operation.Key.EndsWith("@/metadata", StringComparison.Ordinal))
+            .Select(operation => operation.Value!["bindings"]!["x-signalr"]!["target"]!.GetValue<string>()).Order()
+            .ShouldBe(new[] { "Changed", "ClearSummary", "Confirm", "Defaults", "OnlyAttributes", "OnlyContract", "OnlySummary", "wire-read", "XmlOnly" }.Order());
+        foreach (var entry in document["operations"]!.AsObject())
+        {
+            var operation = entry.Value!;
+            var request = Message(document, operation);
+            request["name"]!.GetValue<string>().ShouldBe(entry.Key);
+            request["payload"]!["schema"]!["properties"]!["target"]!["const"]!.GetValue<string>()
+                .ShouldBe(operation["bindings"]!["x-signalr"]!["target"]!.GetValue<string>());
+            if (operation["reply"] is { } reply)
+            {
+                JsonNode.DeepEquals(operation["channel"], reply["channel"]).ShouldBeTrue();
+                Message(document, operation, reply: true)["name"]!.GetValue<string>().ShouldBe(entry.Key + ".result");
+            }
+        }
+
+        var other = source.Generate("matchmaking-signalr-v2", TestContext.Current.CancellationToken);
+        other["channels"]!.AsObject().Select(channel => channel.Key).ShouldBe(["/other"]);
+        document["operations"]!.AsObject().Any(operation => operation.Key.EndsWith("@/other", StringComparison.Ordinal)).ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Changing display names only changes operation and message titles while preserving the complete transport contract")]
     public async Task RenamesOnlyDocumentationTitles()
     {
@@ -247,6 +286,19 @@ public sealed class MetadataHub : Hub<IMetadataClient>, IDocumentedHubEndpoint
     public void XmlOnly() { }
 
     public void Defaults() { }
+}
+
+public sealed class SecondaryMetadataHub : Hub, IDocumentedHubEndpoint
+{
+    public static string Name => "metadata";
+
+    public static string Summary => "Metadata";
+
+    public static ApiVersion ApiVersion => new(1, 0);
+
+    public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<SecondaryMetadataHub>("/secondary");
+
+    public string GetState() => "Searching";
 }
 
 public interface IMetadataClient
