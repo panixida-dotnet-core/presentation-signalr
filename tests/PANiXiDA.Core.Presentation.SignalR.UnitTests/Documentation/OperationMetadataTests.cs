@@ -193,7 +193,11 @@ public sealed class OperationMetadataTests
     [Fact(DisplayName = "Static hub contracts reject invalid metadata and snapshot operation dictionaries")]
     public void ValidatesAndSnapshotsStaticContracts()
     {
-        HubMethodDescription[] methods = [new("wire-read", []) { MemberName = "Read" }];
+        HubMethodDescription[] methods =
+        [
+            new("wire-read", []) { MemberName = "Read" },
+            new("Changed", [], isClientMethod: true)
+        ];
         ContractGuardHub.Name = "";
         Should.Throw<ArgumentException>(() => HubDocumentationRegistry.RegisterHub<ContractGuardHub>(methods));
         ContractGuardHub.Name = "guard";
@@ -211,13 +215,19 @@ public sealed class OperationMetadataTests
         Should.Throw<ArgumentException>(() => HubDocumentationRegistry.RegisterHub<ContractGuardHub>(methods));
         ContractGuardHub.Operations = new Dictionary<string, ApiOperationMetadata> { ["Read"] = null! };
         Should.Throw<ArgumentException>(() => HubDocumentationRegistry.RegisterHub<ContractGuardHub>(methods));
-        var operations = new Dictionary<string, ApiOperationMetadata> { ["Read"] = new("Original") };
+        var operations = new Dictionary<string, ApiOperationMetadata>
+        {
+            ["Read"] = new("Original"),
+            ["client.Changed"] = new("Original callback")
+        };
         ContractGuardHub.Operations = operations;
 
         HubDocumentationRegistry.RegisterHub<ContractGuardHub>(methods);
         operations["Read"] = new ApiOperationMetadata("Changed");
+        operations["client.Changed"] = new ApiOperationMetadata("Changed callback");
 
         HubDocumentationRegistry.Find(typeof(ContractGuardHub))!.Operations["Read"].Name.ShouldBe("Original");
+        HubDocumentationRegistry.Find(typeof(ContractGuardHub))!.Operations["client.Changed"].Name.ShouldBe("Original callback");
         HubDocumentationRegistry.RegisterHub<LegacyGuardHub>(new ApiDocumentDescriptor(
             "legacy", "Legacy", "legacy", "1.0", ApiDocumentFormat.AsyncApi));
         HubDocumentationRegistry.Find(typeof(LegacyGuardHub))!.Operations.ShouldBeEmpty();

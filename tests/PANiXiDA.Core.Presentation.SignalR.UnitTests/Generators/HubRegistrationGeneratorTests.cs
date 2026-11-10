@@ -221,8 +221,10 @@ public sealed class HubRegistrationGeneratorTests
         }
     }
 
-    [Fact(DisplayName = "Documentation handles async return shapes inherited attributes callbacks arrays and dynamic payloads")]
-    public void Generate_ShouldCoverStandardContractShapes()
+    [Theory(DisplayName = "Documentation handles async return shapes inherited attributes callbacks arrays and dynamic payloads")]
+    [InlineData("object")]
+    [InlineData("string[]")]
+    public void Generate_ShouldCoverStandardContractShapes(string untypedClient)
     {
         var source = $$"""
             using Microsoft.AspNetCore.SignalR;
@@ -262,7 +264,7 @@ public sealed class HubRegistrationGeneratorTests
                 public static void Static() { }
                 public string Property { get; set; } = "";
             }
-            public class UntypedClient : Hub<object>, IDocumentedHubEndpoint { {{ContractMembers("UntypedClient", "other")}} public void Run() { } }
+            public class UntypedClient : Hub<{{untypedClient}}>, IDocumentedHubEndpoint { {{ContractMembers("UntypedClient", "other")}} public void Run() { } }
             """;
         var (result, _) = Compile(source);
         var generated = result.GeneratedTrees.Single().ToString();
