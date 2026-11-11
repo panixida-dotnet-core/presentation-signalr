@@ -28,22 +28,22 @@ internal static class HubDocumentationEmitter
         {
             AppendRegistration(result, hub);
             var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var entry in HubMethods(hub))
+            foreach (var (method, client) in HubMethods(hub))
             {
-                if (AttributeValue(entry.Method, "Microsoft.AspNetCore.Routing.EndpointNameAttribute") is { } name && string.IsNullOrWhiteSpace(name))
+                if (AttributeValue(method, "Microsoft.AspNetCore.Routing.EndpointNameAttribute") is { } name && string.IsNullOrWhiteSpace(name))
                 {
-                    context.ReportDiagnostic(Diagnostic.Create(InvalidOperationName, entry.Method.Locations[0], entry.Method.ToDisplayString()));
+                    context.ReportDiagnostic(Diagnostic.Create(InvalidOperationName, method.Locations[0], method.ToDisplayString()));
                     continue;
                 }
 
-                var target = Target(entry.Method);
-                if (!targets.Add((entry.Client ? "client:" : "hub:") + target) || !IsSupported(entry.Method, entry.Client))
+                var target = Target(method);
+                if (!targets.Add((client ? "client:" : "hub:") + target) || !IsSupported(method, client))
                 {
-                    context.ReportDiagnostic(Diagnostic.Create(UnsupportedMethod, entry.Method.Locations[0], entry.Method.ToDisplayString()));
+                    context.ReportDiagnostic(Diagnostic.Create(UnsupportedMethod, method.Locations[0], method.ToDisplayString()));
                     continue;
                 }
 
-                AppendMethod(result, entry.Method, target, entry.Client);
+                AppendMethod(result, method, target, client);
             }
 
             result.AppendLine("            });");
@@ -59,7 +59,7 @@ internal static class HubDocumentationEmitter
             .Append("            new ").Append(Metadata).AppendLine("HubMethodDescription[] {");
     }
 
-    private static IEnumerable<(IMethodSymbol Method, bool Client)> HubMethods(INamedTypeSymbol hub)
+    private static List<(IMethodSymbol Method, bool Client)> HubMethods(INamedTypeSymbol hub)
     {
         var methods = Methods(hub).Select(method => (Method: method, Client: false)).ToList();
         for (var current = hub.BaseType; current is not null; current = current.BaseType)
@@ -114,10 +114,10 @@ internal static class HubDocumentationEmitter
         }
 
         result.Append("            }, ").Append(returnType is null ? "null" : "typeof(" + TypeName(returnType) + ")")
-            .Append(", isClientMethod: ").Append(client ? "true" : "false")
-            .Append(", isStream: ").Append(resultStream ? "true" : "false")
+            .Append(", isClientMethod: ").Append(Literal(client))
+            .Append(", isStream: ").Append(Literal(resultStream))
             .Append(", summary: ").Append(Literal(Summary(method)))
-            .Append(", requiresAuthorization: ").Append(HasMetadata(method, "Microsoft.AspNetCore.Authorization.IAuthorizeData") ? "true" : "false").AppendLine(") {")
+            .Append(", requiresAuthorization: ").Append(Literal(HasMetadata(method, "Microsoft.AspNetCore.Authorization.IAuthorizeData"))).AppendLine(") {")
             .Append("                MemberName = ").Append(Literal(method.Name)).AppendLine(",")
             .Append("                Documentation = new global::PANiXiDA.Core.ApiDocumentation.ApiOperationMetadata(")
             .Append(Literal(AttributeValue(method, "Microsoft.AspNetCore.Routing.EndpointNameAttribute") ?? method.Name)).Append(", ")
@@ -129,9 +129,11 @@ internal static class HubDocumentationEmitter
         var payload = StreamItem(parameter.Type, out var stream);
         result.Append("                new ").Append(Metadata).Append("HubParameterDescription(")
             .Append(Literal(parameter.Name)).Append(", typeof(").Append(TypeName(payload))
-            .Append("), ").Append(stream ? "true" : "false")
-            .Append(", allowImplicitServices: ").Append(parameter.GetAttributes().Length == 0 ? "true" : "false").AppendLine("),");
+            .Append("), ").Append(Literal(stream))
+            .Append(", allowImplicitServices: ").Append(Literal(parameter.GetAttributes().Length == 0)).AppendLine("),");
     }
+
+    private static string Literal(bool value) => value ? "true" : "false";
 
     private static bool ShouldSerialize(IParameterSymbol parameter, bool resultStream, bool client)
     {

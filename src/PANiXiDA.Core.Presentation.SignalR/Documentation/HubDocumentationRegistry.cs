@@ -33,7 +33,7 @@ public static class HubDocumentationRegistry
         ArgumentNullException.ThrowIfNull(version);
         if (version == ApiVersion.Neutral)
         {
-            throw new ArgumentException("Documented hubs require a concrete API version.", nameof(THub.ApiVersion));
+            throw new ArgumentException("Documented hubs require a concrete API version.");
         }
 
         var text = version.ToString();
@@ -64,13 +64,11 @@ public static class HubDocumentationRegistry
             throw new ArgumentException("An AsyncAPI descriptor and non-null methods are required.");
         }
 
-        foreach (var operation in operations)
+        var invalidOperation = operations.FirstOrDefault(operation => operation.Value is null || !methods.Any(method =>
+            operation.Key == (method.IsClientMethod ? "client." : string.Empty) + method.MemberName));
+        if (invalidOperation.Key is not null)
         {
-            if (operation.Value is null || !methods.Any(method =>
-                    operation.Key == (method.IsClientMethod ? "client." : string.Empty) + method.MemberName))
-            {
-                throw new ArgumentException($"Operation '{operation.Key}' does not identify a generated hub method or typed client callback.", nameof(operations));
-            }
+            throw new ArgumentException($"Operation '{invalidOperation.Key}' does not identify a generated hub method or typed client callback.", nameof(operations));
         }
 
         Registrations.Add(typeof(THub), new HubDescription(document, Array.AsReadOnly(methods.ToArray()),

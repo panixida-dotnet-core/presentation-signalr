@@ -20,6 +20,9 @@ namespace PANiXiDA.Core.Presentation.SignalR.UnitTests.Documentation;
 
 public sealed class OperationMetadataTests
 {
+    private static readonly string[] MetadataTargets =
+        ["Changed", "ClearSummary", "Confirm", "Defaults", "Dispose", "OnlyAttributes", "OnlyContract", "OnlySummary", "wire-read", "XmlOnly"];
+
     [Fact(DisplayName = "Hub contracts merge Operations attributes XML summaries and automatic method names without changing wire targets")]
     public async Task ResolvesContractAndAttributeMetadata()
     {
@@ -73,7 +76,7 @@ public sealed class OperationMetadataTests
         document["operations"]!.AsObject().Count.ShouldBe(11);
         document["operations"]!.AsObject().Where(operation => operation.Key.EndsWith("@/metadata", StringComparison.Ordinal))
             .Select(operation => operation.Value!["bindings"]!["x-signalr"]!["target"]!.GetValue<string>()).Order()
-            .ShouldBe(new[] { "Changed", "ClearSummary", "Confirm", "Defaults", "Dispose", "OnlyAttributes", "OnlyContract", "OnlySummary", "wire-read", "XmlOnly" }.Order());
+            .ShouldBe(MetadataTargets.Order());
         foreach (var entry in document["operations"]!.AsObject())
         {
             var operation = entry.Value!;
@@ -262,6 +265,7 @@ public sealed class OperationMetadataTests
     public abstract class LegacyGuardHub : Hub;
 }
 
+#pragma warning disable CA1822 // SignalR discovers instance methods as hub endpoints.
 public sealed class MetadataHub : Hub<IMetadataClient>, IDocumentedHubEndpoint
 {
     public static string Name => "metadata";
@@ -317,6 +321,8 @@ public sealed class SecondaryMetadataHub : Hub, IDocumentedHubEndpoint
 
     public string GetState() => "Searching";
 }
+
+#pragma warning restore CA1822
 
 public interface IMetadataClient
 {

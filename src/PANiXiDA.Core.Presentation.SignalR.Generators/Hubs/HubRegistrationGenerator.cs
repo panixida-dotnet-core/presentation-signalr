@@ -59,15 +59,9 @@ public sealed class HubRegistrationGenerator : IIncrementalGenerator
 
         var hubs = new List<INamedTypeSymbol>();
         var documentedHubs = new List<INamedTypeSymbol>();
-        var seen = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
-        foreach (var type in candidates.OrderBy(GetRuntimeName, StringComparer.Ordinal))
+        foreach (var type in candidates.Distinct<INamedTypeSymbol>(SymbolEqualityComparer.Default).OrderBy(GetRuntimeName, StringComparer.Ordinal))
         {
             context.CancellationToken.ThrowIfCancellationRequested();
-            if (!seen.Add(type))
-            {
-                continue;
-            }
-
             var mapped = type.AllInterfaces.Any(item => SymbolEqualityComparer.Default.Equals(item, contract));
             var documented = IsHub(type) && HubDocumentationEmitter.HasContract(type);
             if (!mapped && !documented)

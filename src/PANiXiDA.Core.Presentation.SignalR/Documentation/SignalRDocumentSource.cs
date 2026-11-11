@@ -17,6 +17,10 @@ namespace PANiXiDA.Core.Presentation.SignalR.Documentation;
 internal sealed class SignalRDocumentSource(
     MappedHubDocumentation mappings, ApiSchemaRegistry schemas, IServiceProvider services) : IAsyncApiDocumentSource
 {
+    private const string InvocationId = "invocationId";
+    private const string Target = "target";
+    private const string JsonString = "string";
+
     public IReadOnlyCollection<ApiDocumentDescriptor> GetDocuments()
     {
         return [.. mappings.Hubs.Select(hub => hub.Description.Document).GroupBy(document => document.Name).Select(ValidateDocument)];
@@ -74,12 +78,11 @@ internal sealed class SignalRDocumentSource(
 
     private static void ValidateOverrides(HubDescription hub, IReadOnlyList<HubOperationOverride> overrides)
     {
-        foreach (var operation in overrides)
+        var invalidOperation = overrides.FirstOrDefault(operation =>
+            !hub.Methods.Any(method => method.MemberName == operation.MemberName && method.IsClientMethod == operation.IsClientMethod));
+        if (invalidOperation is not null)
         {
-            if (!hub.Methods.Any(method => method.MemberName == operation.MemberName && method.IsClientMethod == operation.IsClientMethod))
-            {
-                throw new InvalidOperationException($"Operation '{operation.MemberName}' does not identify a generated hub method or typed client callback.");
-            }
+            throw new InvalidOperationException($"Operation '{invalidOperation.MemberName}' does not identify a generated hub method or typed client callback.");
         }
     }
 
@@ -105,7 +108,7 @@ internal sealed class SignalRDocumentSource(
         return new JsonArray([.. services.GetRequiredService<IHubProtocolResolver>().AllProtocols
             .Where(protocol => (options.SupportedProtocols is null || options.SupportedProtocols.Contains(protocol.Name, StringComparer.OrdinalIgnoreCase)) &&
                 (protocol.TransferFormat != TransferFormat.Binary || (transports & (HttpTransportType.WebSockets | HttpTransportType.LongPolling)) != 0))
-            .Select(protocol => (JsonNode)JsonValue.Create(protocol.Name)!)]);
+            .Select(protocol => (JsonNode?)JsonValue.Create(protocol.Name))]);
     }
 
     private static bool IsSerialized(HubParameterDescription parameter, HubMethodDescription method,
@@ -129,7 +132,7 @@ internal sealed class SignalRDocumentSource(
                 {
                     ["x-signalr"] = new JsonObject
                     {
-                        ["target"] = method.Name,
+                        [Target] = method.Name,
                         ["parameter"] = parameter.Name,
                         ["messageType"] = "streamItem",
                         ["authorizationRequired"] = context.Authorized || method.RequiresAuthorization,
@@ -145,10 +148,10 @@ internal sealed class SignalRDocumentSource(
         HubParameterDescription[] parameters, ApiOperationMetadata documentation)
     {
         var streamNames = new JsonArray([.. parameters.Where(parameter => parameter.IsStream)
-            .Select(parameter => (JsonNode)JsonValue.Create(parameter.Name)!)]);
+            .Select(parameter => (JsonNode?)JsonValue.Create(parameter.Name))]);
         var binding = new JsonObject
         {
-            ["target"] = method.Name,
+            [Target] = method.Name,
             ["streamResult"] = method.IsStream,
             ["authorizationRequired"] = !method.IsClientMethod && (context.Authorized || method.RequiresAuthorization),
             ["inputStreams"] = streamNames,
@@ -160,6 +163,7 @@ internal sealed class SignalRDocumentSource(
         {
             Title = documentation.Name + (method.IsClientMethod && method.ResultType is null ? " notification" : " request")
         };
+        var replySuffix = method.IsStream ? " stream" : " response";
         return new AsyncApiOperation(id, context.Path, method.IsClientMethod ? AsyncApiAction.Send : AsyncApiAction.Receive,
             message, context.WireProtocol, documentation.Summary)
         {
@@ -168,7 +172,7 @@ internal sealed class SignalRDocumentSource(
             Reply = !method.IsClientMethod || method.ResultType is not null
                 ? new AsyncApiMessage(id + ".result", CreateReplySchema(method.ResultType, method.IsStream))
                 {
-                    Title = documentation.Name + (method.IsStream ? " stream" : " response")
+                    Title = documentation.Name + replySuffix
                 } : null
         };
     }
@@ -191,14 +195,14 @@ internal sealed class SignalRDocumentSource(
         var properties = new JsonObject
         {
             ["type"] = new JsonObject { ["const"] = method.IsStream ? 4 : 1 },
-            ["invocationId"] = new JsonObject { ["type"] = "string" },
-            ["target"] = new JsonObject { ["const"] = method.Name },
+            [InvocationId] = new JsonObject { ["type"] = JsonString },
+            [Target] = new JsonObject { ["const"] = method.Name },
             ["arguments"] = arguments
         };
-        var required = new JsonArray("type", "target", "arguments");
+        var required = new JsonArray("type", Target, "arguments");
         if (method.IsStream)
         {
-            required.Add((JsonNode)JsonValue.Create("invocationId")!);
+            required.Add((JsonNode?)JsonValue.Create(InvocationId));
         }
 
         if (streams > 0)
@@ -206,11 +210,11 @@ internal sealed class SignalRDocumentSource(
             properties["streamIds"] = new JsonObject
             {
                 ["type"] = "array",
-                ["items"] = new JsonObject { ["type"] = "string" },
+                ["items"] = new JsonObject { ["type"] = JsonString },
                 ["minItems"] = streams,
                 ["maxItems"] = streams
             };
-            required.Add((JsonNode)JsonValue.Create("streamIds")!);
+            required.Add((JsonNode?)JsonValue.Create("streamIds"));
         }
 
         return new JsonObject { ["type"] = "object", ["properties"] = properties, ["required"] = required };
@@ -239,7 +243,7 @@ internal sealed class SignalRDocumentSource(
             alternatives.Add((JsonNode)ProtocolMessage(3));
         }
 
-        alternatives.Add((JsonNode)ProtocolMessage(3, "error", new JsonObject { ["type"] = "string" }));
+        alternatives.Add((JsonNode)ProtocolMessage(3, "error", new JsonObject { ["type"] = JsonString }));
         return new JsonObject { ["oneOf"] = alternatives };
     }
 
@@ -248,14 +252,14 @@ internal sealed class SignalRDocumentSource(
         var properties = new JsonObject
         {
             ["type"] = new JsonObject { ["const"] = messageType },
-            ["invocationId"] = new JsonObject { ["type"] = "string" },
-            ["headers"] = new JsonObject { ["type"] = "object", ["additionalProperties"] = new JsonObject { ["type"] = "string" } }
+            [InvocationId] = new JsonObject { ["type"] = JsonString },
+            ["headers"] = new JsonObject { ["type"] = "object", ["additionalProperties"] = new JsonObject { ["type"] = JsonString } }
         };
-        var required = new JsonArray("type", "invocationId");
+        var required = new JsonArray("type", InvocationId);
         if (member is not null)
         {
             properties[member] = schema;
-            required.Add((JsonNode)JsonValue.Create(member)!);
+            required.Add((JsonNode?)JsonValue.Create(member));
         }
 
         return new JsonObject
@@ -271,7 +275,7 @@ internal sealed class SignalRDocumentSource(
     {
         HttpTransportType[] candidates = [HttpTransportType.WebSockets, HttpTransportType.ServerSentEvents, HttpTransportType.LongPolling];
         return new JsonArray([.. candidates.Where(transport => (transports & transport) != 0)
-            .Select(transport => (JsonNode)JsonValue.Create(transport.ToString())!)]);
+            .Select(transport => (JsonNode?)JsonValue.Create(transport.ToString()))]);
     }
 
     private sealed record HubContext(string Path, bool Authorized, JsonArray Protocols, bool ImplicitServices, HttpTransportType Transports)

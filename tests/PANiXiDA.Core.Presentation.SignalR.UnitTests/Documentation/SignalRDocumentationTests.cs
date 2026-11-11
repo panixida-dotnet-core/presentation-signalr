@@ -42,8 +42,9 @@ public sealed class SignalRDocumentationTests
             hubs.MapHub<DocumentationV2Hub>("/v2/state");
         });
         var source = app.Services.GetServices<IApiDocumentSource>().OfType<IAsyncApiDocumentSource>().Single();
-        RequestDelegate handler = context => context.Response.WriteAsync(source.Generate("matchmaking-signalr-v1", context.RequestAborted).ToJsonString(), context.RequestAborted);
-        app.MapGet("/contract", handler);
+        Task Handler(HttpContext context) => context.Response.WriteAsync(
+            source.Generate("matchmaking-signalr-v1", context.RequestAborted).ToJsonString(), context.RequestAborted);
+        app.MapGet("/contract", (RequestDelegate)Handler);
         await app.StartAsync(TestContext.Current.CancellationToken);
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
         using var client = new HttpClient { BaseAddress = new Uri(address) };
@@ -223,6 +224,7 @@ public sealed class SignalRDocumentationTests
     public sealed class PlainHub : Hub;
 }
 
+#pragma warning disable CA1822, IDE0060 // Keep instance endpoints and the signatures used by the documentation tests.
 public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHubEndpoint
 {
     public static string Name => "matchmaking";
@@ -263,6 +265,8 @@ public sealed class DocumentationV2Hub : Hub, IDocumentedHubEndpoint
 
     public ValueTask<DocumentationPayload> Read() => ValueTask.FromResult(new DocumentationPayload(Guid.Empty, "ready"));
 }
+
+#pragma warning restore CA1822, IDE0060
 
 public interface IDocumentationClient
 {
