@@ -120,7 +120,7 @@ public sealed class SignalRDocumentationTests
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Services.AddSignalR(builder.Configuration);
-        builder.Services.AddAuthorization(options => options.FallbackPolicy =
+        builder.Services.AddAuthorizationBuilder().SetFallbackPolicy(
             fallback ? new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build() : null);
         builder.Services.AddApiDocumentationSchemas(DocumentationJsonContext.Default);
         await using var app = builder.Build();
