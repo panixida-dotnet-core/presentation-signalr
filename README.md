@@ -343,20 +343,6 @@ by Native AOT. They remain available for normal JIT deployments.
 See Microsoft's [SignalR Native AOT guidance](https://learn.microsoft.com/aspnet/core/release-notes/aspnetcore-9.0#signalr-supports-trimming-and-native-aot)
 and [configuration source generator documentation](https://learn.microsoft.com/dotnet/core/extensions/configuration-generator).
 
-## Project Structure
-
-```text
-src/
-  PANiXiDA.Core.Presentation.SignalR.Generators/
-  PANiXiDA.Core.Presentation.SignalR/
-    Configurations/
-    DependencyInjection/
-    Hubs/
-tests/
-  PANiXiDA.Core.Presentation.SignalR.UnitTests/
-  PANiXiDA.Core.Presentation.SignalR.IntegrationTests/
-```
-
 ## AsyncAPI documentation
 
 Implement `IDocumentedHubEndpoint` instead of applying attributes to the hub:
@@ -423,3 +409,59 @@ The host uses the SignalR and `PANiXiDA.Core.Presentation.Scalar.DependencyInjec
 `/asyncapi/matchmaking-signalr-v1.json` contains actual paths, arguments, replies, callbacks and streams. `x-signalr` bindings report targets, protocols, mapped transports and authorization, including the fallback policy configured in `AuthorizationOptions`. JSON envelopes contain generated payload schemas. Completion errors remain strings. MessagePack uses its binary protocol encoding. Untyped `Clients.SendAsync` calls require a custom document source because their runtime target strings cannot be inferred reliably.
 
 Versions describe documents; routes and transport negotiation remain application-owned. ASP.NET Core restrictions for `Hub<TClient>` and value-type upload streams remain.
+
+## Project Structure
+
+```text
+src/
+  PANiXiDA.Core.Presentation.SignalR.Generators/
+  PANiXiDA.Core.Presentation.SignalR/
+    Configurations/
+    DependencyInjection/
+    Hubs/
+tests/
+  PANiXiDA.Core.Presentation.SignalR.UnitTests/
+  PANiXiDA.Core.Presentation.SignalR.IntegrationTests/
+```
+
+## Development
+
+```bash
+dotnet restore
+dotnet format
+dotnet build --configuration Release
+dotnet test --configuration Release
+dotnet pack --configuration Release
+```
+
+Hosting tests start Kestrel on `127.0.0.1` with an OS-assigned port and use real
+HTTP, WebSocket and Long Polling connections. Authentication uses a test handler.
+Integration tests start an isolated Redis container with Testcontainers and clean
+it up afterwards. They exercise delivery between independent application hosts.
+To run only the tests that do not require Docker:
+
+```bash
+dotnet test --project tests/PANiXiDA.Core.Presentation.SignalR.UnitTests/PANiXiDA.Core.Presentation.SignalR.UnitTests.csproj --configuration Release
+```
+
+### Continuous integration
+
+Every pull request and push to `main` runs formatting, tests, and mandatory
+SonarQube analysis. Publishing starts only after formatting, tests and the
+SonarQube Quality Gate succeed. Versioning uses Nerdbank.GitVersioning and tracks
+package source, shared build settings, README and icon.
+
+## Package Contents
+
+The NuGet package includes the `net10.0` library, its `netstandard2.0` source
+generator under `analyzers/dotnet/cs`, XML documentation, README,
+license metadata, icon and repository metadata. Runtime dependencies include
+Redis integration, `Asp.Versioning.Abstractions`, `PANiXiDA.Core.ApiDocumentation`,
+`PANiXiDA.Core.ResultPattern`, and `Nerdbank.MessagePack.SignalR`.
+PolyType supplies the MessagePack type shape generator.
+Microsoft's SignalR Client, MessagePack protocol, and Testcontainers are test-only.
+A symbols package is produced by the repository's packaging settings.
+
+## License
+
+Licensed under Apache-2.0. See [LICENSE](LICENSE).
