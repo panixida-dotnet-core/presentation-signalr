@@ -301,12 +301,100 @@ public sealed class HubRegistrationGeneratorTests
         generated.ShouldNotContain("isClientMethod: false");
     }
 
+    [Fact(DisplayName = "Overrides with different nullable annotations are documented once")]
+    public void Generate_ShouldIgnoreNullableAnnotationsInOverrides()
+    {
+        var source = $$"""
+            using System.Collections.Generic;
+            using Microsoft.AspNetCore.SignalR;
+            using PANiXiDA.Core.Presentation.SignalR.Hubs;
+            public abstract class Parent : Hub
+            {
+                public virtual void Send(List<string> value) { }
+            }
+            public class Documented : Parent, IDocumentedHubEndpoint
+            {
+                {{ContractMembers("Documented")}}
+                public override void Send(List<string?>? value) { }
+            }
+            """;
+
+        var (result, _) = Compile(source);
+
+        result.GeneratedTrees.Single().ToString().Split("MemberName = \"Send\"").Length.ShouldBe(2);
+    }
+
     [Theory(DisplayName = "Documented typed callbacks reject unsupported streaming signatures")]
     [InlineData("System.Threading.Tasks.Task Watch(System.Collections.Generic.IAsyncEnumerable<string> values);")]
     [InlineData("System.Collections.Generic.IAsyncEnumerable<string> Watch();")]
     public void Generate_ShouldRejectStreamingClientCallbacks(string method)
     {
         Compile("public interface IClient { " + method + " } " + DocumentedSource(string.Empty, "Microsoft.AspNetCore.SignalR.Hub<IClient>"), "PANSIGNALRSG003");
+    }
+
+    [Fact(DisplayName = "Awaiter metadata resolves inherited awaitables and preserves ordinary payload types")]
+    public void Generate_ShouldDistinguishAwaitablesFromPayloads()
+    {
+        var source = $$"""
+            using System;
+            using System.Runtime.CompilerServices;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.SignalR;
+            using PANiXiDA.Core.Presentation.SignalR.Hubs;
+            public class AwaitableBase
+            {
+                public TaskAwaiter<int> GetAwaiter() => Task.FromResult(42).GetAwaiter();
+            }
+            public class Awaitable : AwaitableBase { }
+            public class PayloadWithOverloads
+            {
+                public TaskAwaiter<int> GetAwaiter(int value) => Task.FromResult(value).GetAwaiter();
+                public static TaskAwaiter<int> GetAwaiter() => Task.FromResult(42).GetAwaiter();
+                public TaskAwaiter<int> GetAwaiter<T>() => Task.FromResult(42).GetAwaiter();
+            }
+            public class PayloadWithoutNotification
+            {
+                public object GetAwaiter() => new object();
+            }
+            public class PayloadWithoutCompletionFlag
+            {
+                public Awaiter GetAwaiter() => new Awaiter();
+                public class Awaiter : INotifyCompletion
+                {
+                    public int IsCompleted => 1;
+                    public int GetResult() => 42;
+                    public void OnCompleted(Action continuation) => continuation();
+                }
+            }
+            public class PayloadWithoutResult
+            {
+                public Awaiter GetAwaiter() => new Awaiter();
+                public class Awaiter : INotifyCompletion
+                {
+                    public bool IsCompleted => true;
+                    public void OnCompleted(Action continuation) => continuation();
+                }
+            }
+            public class Documented : Hub, IDocumentedHubEndpoint
+            {
+                {{ContractMembers("Documented")}}
+                public Awaitable Read() => new Awaitable();
+                public PayloadWithOverloads Overloads() => new PayloadWithOverloads();
+                public PayloadWithoutNotification NoNotification() => new PayloadWithoutNotification();
+                public PayloadWithoutCompletionFlag NoCompletionFlag() => new PayloadWithoutCompletionFlag();
+                public PayloadWithoutResult NoResult() => new PayloadWithoutResult();
+            }
+            """;
+
+        var (result, _) = Compile(source);
+
+        var generated = result.GeneratedTrees.Single().ToString();
+        generated.ShouldContain("typeof(int)");
+        generated.ShouldNotContain("typeof(global::Awaitable)");
+        generated.ShouldContain("typeof(global::PayloadWithOverloads)");
+        generated.ShouldContain("typeof(global::PayloadWithoutNotification)");
+        generated.ShouldContain("typeof(global::PayloadWithoutCompletionFlag)");
+        generated.ShouldContain("typeof(global::PayloadWithoutResult)");
     }
 
     [Fact(DisplayName = "Generator tolerates incomplete attributes without replacing compiler diagnostics")]

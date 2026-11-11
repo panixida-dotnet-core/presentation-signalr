@@ -404,7 +404,9 @@ Each mapped hub path has one channel shared by invocations, callbacks, streams, 
 
 Typed callbacks use `client.MethodName` keys in `Operations` and `WithClientOperation(nameof(IClient.MethodName), name: ..., summary: ...)` in Map. Unknown method/callback names fail explicitly. Dictionaries are snapshotted per hub; builder overrides belong to the mapped path.
 
-The generator discovers inherited methods, async results, typed callbacks and both streaming directions without runtime reflection discovery. Hub lifecycle methods are excluded; typed client callbacks named `Dispose` remain documented. DI parameters, streaming cancellation tokens and trailing callback cancellation tokens are excluded. Unsupported method signatures or duplicate targets produce a build diagnostic.
+The generator discovers inherited methods, async results, typed callbacks and both streaming directions without runtime reflection discovery. Hub lifecycle methods are excluded. Typed client callbacks named `Dispose` remain documented. DI parameters, streaming cancellation tokens and trailing callback cancellation tokens are excluded. Unsupported method signatures or duplicate targets produce a build diagnostic.
+
+Custom awaitables supported by the SignalR dispatcher, such as the return value of `ConfigureAwait`, are documented using their awaited result. Use `Task` or `ValueTask` for Native AOT hub methods.
 
 Register generated JSON metadata for arguments, results and stream items, then connect the independent presenter:
 
@@ -418,6 +420,6 @@ app.UseApiDocumentation();
 
 The host uses the SignalR and `PANiXiDA.Core.Presentation.Scalar.DependencyInjection` namespaces. `ApplicationJsonContext` is an application-owned `[JsonSerializable]` context; configure SignalR JSON resolvers and MessagePack shapes for the same payloads as usual. Missing schema metadata fails without reflection fallback.
 
-`/asyncapi/matchmaking-signalr-v1.json` contains actual paths, arguments, replies, callbacks and streams. `x-signalr` bindings report targets, protocols, mapped transports and authorization. JSON envelopes contain generated payload schemas; completion errors remain strings. MessagePack uses its binary protocol encoding. Untyped `Clients.SendAsync` calls require a custom document source because their runtime target strings cannot be inferred reliably.
+`/asyncapi/matchmaking-signalr-v1.json` contains actual paths, arguments, replies, callbacks and streams. `x-signalr` bindings report targets, protocols, mapped transports and authorization, including the fallback policy configured in `AuthorizationOptions`. JSON envelopes contain generated payload schemas. Completion errors remain strings. MessagePack uses its binary protocol encoding. Untyped `Clients.SendAsync` calls require a custom document source because their runtime target strings cannot be inferred reliably.
 
 Versions describe documents; routes and transport negotiation remain application-owned. ASP.NET Core restrictions for `Hub<TClient>` and value-type upload streams remain.

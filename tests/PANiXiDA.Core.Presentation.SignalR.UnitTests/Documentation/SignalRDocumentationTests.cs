@@ -1,9 +1,11 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
 
 using Asp.Versioning;
 
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -11,6 +13,7 @@ using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -93,12 +96,48 @@ public sealed class SignalRDocumentationTests
         operations.Single(operation => operation.Key.Contains("hub.WatchDerived@", StringComparison.Ordinal)).Value!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
         var v2 = source.Generate("matchmaking-signalr-v2", TestContext.Current.CancellationToken);
         v2["info"]!["x-deprecated"]!.GetValue<bool>().ShouldBeTrue();
+        var configured = v2["components"]!["messages"]!.AsObject().Single(message =>
+            message.Value!["name"]!.GetValue<string>().EndsWith("hub.Read@/v2/state.result", StringComparison.Ordinal)).Value!;
+        configured["payload"]!["schema"]!["oneOf"]![0]!["properties"]!["result"]!["properties"]!["state"].ShouldNotBeNull();
+        await using var connection = new HubConnectionBuilder().WithUrl(address + "/v2/state").Build();
+        await connection.StartAsync(TestContext.Current.CancellationToken);
+        var result = await connection.InvokeAsync<DocumentationPayload>(nameof(DocumentationV2Hub.Read), TestContext.Current.CancellationToken);
+        result.State.ShouldBe("ready");
+        await connection.StopAsync(TestContext.Current.CancellationToken);
         Should.Throw<ArgumentException>(() => source.Generate("missing"));
         Should.Throw<ArgumentException>(() => source.Generate(""));
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
         Should.Throw<OperationCanceledException>(() => source.Generate("matchmaking-signalr-v1", cancelled.Token));
         await app.StopAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Theory(DisplayName = "Fallback authorization applies to hub documentation unless the endpoint allows anonymous access")]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    public async Task HonorsFallbackAuthorization(bool fallback, bool anonymous, bool expected)
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Services.AddSignalR(builder.Configuration);
+        builder.Services.AddAuthorization(options => options.FallbackPolicy =
+            fallback ? new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build() : null);
+        builder.Services.AddApiDocumentationSchemas(DocumentationJsonContext.Default);
+        await using var app = builder.Build();
+        app.UseSignalR(hubs =>
+        {
+            var endpoint = hubs.MapHub<DocumentationV2Hub>("/fallback");
+            if (anonymous)
+            {
+                endpoint.AllowAnonymous();
+            }
+        });
+
+        var source = app.Services.GetServices<IApiDocumentSource>().OfType<IAsyncApiDocumentSource>().Single();
+        var document = source.Generate("matchmaking-signalr-v2", TestContext.Current.CancellationToken);
+        var operations = document["operations"]!.AsObject().Select(operation => operation.Value!).ToArray();
+        operations.ShouldNotBeEmpty();
+        operations.ShouldAllBe(operation => operation["bindings"]!["x-signalr"]!["authorizationRequired"]!.GetValue<bool>() == expected);
     }
 
     [Fact(DisplayName = "Undocumented hubs remain usable without requiring JSON schema metadata")]
@@ -263,7 +302,8 @@ public sealed class DocumentationV2Hub : Hub, IDocumentedHubEndpoint
 
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<DocumentationV2Hub>("/v2/state");
 
-    public ValueTask<DocumentationPayload> Read() => ValueTask.FromResult(new DocumentationPayload(Guid.Empty, "ready"));
+    public ConfiguredTaskAwaitable<DocumentationPayload> Read() =>
+        Task.FromResult(new DocumentationPayload(Guid.Empty, "ready")).ConfigureAwait(false);
 }
 
 #pragma warning restore CA1822, IDE0060

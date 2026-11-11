@@ -200,7 +200,7 @@ internal static class HubDocumentationEmitter
                 continue;
             }
 
-            var signature = method.Name + "(" + string.Join(",", method.Parameters.Select(parameter => parameter.Type.ToDisplayString())) + ")";
+            var signature = method.Name + "(" + string.Join(",", method.Parameters.Select(parameter => TypeName(parameter.Type))) + ")";
             if (signatures.Add(signature))
             {
                 yield return method;
@@ -223,19 +223,41 @@ internal static class HubDocumentationEmitter
 
     private static ITypeSymbol? Unwrap(ITypeSymbol type, out bool stream)
     {
-        if (type is INamedTypeSymbol named && named.IsGenericType &&
-            named.OriginalDefinition.ToDisplayString() is "System.Threading.Tasks.Task<TResult>" or "System.Threading.Tasks.ValueTask<TResult>")
-        {
-            type = named.TypeArguments[0];
-        }
-
-        if (type.SpecialType == SpecialType.System_Void || type.ToDisplayString() is "System.Threading.Tasks.Task" or "System.Threading.Tasks.ValueTask")
+        type = AwaitedResult(type) ?? type;
+        if (type.SpecialType == SpecialType.System_Void)
         {
             stream = false;
             return null;
         }
 
         return ReturnStreamItem(type, out stream);
+    }
+
+    private static ITypeSymbol? AwaitedResult(ITypeSymbol type)
+    {
+        var awaiter = FindParameterlessMethod(type, "GetAwaiter")?.ReturnType;
+        if (awaiter is null || !awaiter.AllInterfaces.Any(item => item.ToDisplayString() == "System.Runtime.CompilerServices.INotifyCompletion") ||
+            !Members(awaiter, "IsCompleted").OfType<IPropertySymbol>().Any(property => property.Type.SpecialType == SpecialType.System_Boolean))
+        {
+            return null;
+        }
+
+        return FindParameterlessMethod(awaiter, "GetResult")?.ReturnType;
+    }
+
+    private static IMethodSymbol? FindParameterlessMethod(ITypeSymbol type, string name) =>
+        Members(type, name).OfType<IMethodSymbol>().FirstOrDefault(method =>
+            method.Parameters.IsEmpty && !method.IsStatic && !method.IsGenericMethod);
+
+    private static IEnumerable<ISymbol> Members(ITypeSymbol type, string name)
+    {
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            foreach (var member in current.GetMembers(name))
+            {
+                yield return member;
+            }
+        }
     }
 
     private static ITypeSymbol ReturnStreamItem(ITypeSymbol type, out bool stream)

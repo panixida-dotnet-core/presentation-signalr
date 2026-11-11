@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 using PANiXiDA.Core.ApiDocumentation;
 using PANiXiDA.Core.ApiDocumentation.AsyncApi;
@@ -70,10 +71,11 @@ internal sealed class SignalRDocumentSource(
         return AsyncApiDocumentBuilder.Build(descriptor, operations);
     }
 
-    private static bool IsAuthorized(Endpoint? endpoint)
+    private bool IsAuthorized(Endpoint? endpoint)
     {
-        return endpoint?.Metadata.GetOrderedMetadata<IAuthorizeData>().Count > 0 &&
-            endpoint.Metadata.GetMetadata<IAllowAnonymous>() is null;
+        return endpoint?.Metadata.GetMetadata<IAllowAnonymous>() is null &&
+            (endpoint?.Metadata.GetMetadata<IAuthorizeData>() is not null ||
+                services.GetRequiredService<IOptions<AuthorizationOptions>>().Value.FallbackPolicy is not null);
     }
 
     private static void ValidateOverrides(HubDescription hub, IReadOnlyList<HubOperationOverride> overrides)
