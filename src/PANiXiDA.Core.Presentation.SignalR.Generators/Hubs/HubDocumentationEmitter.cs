@@ -133,8 +133,6 @@ internal static class HubDocumentationEmitter
             .Append(", allowImplicitServices: ").Append(Literal(parameter.GetAttributes().Length == 0)).AppendLine("),");
     }
 
-    private static string Literal(bool value) => value ? "true" : "false";
-
     private static bool ShouldSerialize(IParameterSymbol parameter, bool resultStream, bool client)
     {
         if (parameter.Type.ToDisplayString() == "System.Threading.CancellationToken" &&
@@ -288,6 +286,8 @@ internal static class HubDocumentationEmitter
     }
 
     private static string Literal(string? value) => value is null ? "null" : SymbolDisplay.FormatLiteral(value, true);
+
+    private static string Literal(bool value) => value ? "true" : "false";
 
     private static string TypeName(ITypeSymbol type) => type.TypeKind == TypeKind.Dynamic ? "global::System.Object" : type.WithNullableAnnotation(NullableAnnotation.NotAnnotated).ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 }
