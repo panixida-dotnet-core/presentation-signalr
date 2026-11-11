@@ -1,13 +1,16 @@
+using PANiXiDA.Core.ApiDocumentation.DependencyInjection;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.StackExchangeRedis;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 using Nerdbank.MessagePack;
 
 using PANiXiDA.Core.Presentation.SignalR.Configurations;
+using PANiXiDA.Core.Presentation.SignalR.Documentation;
 using PANiXiDA.Core.Presentation.SignalR.Hubs;
 using PANiXiDA.Core.Presentation.SignalR.Logging;
 
@@ -47,6 +50,8 @@ public static class ServiceCollectionExtensions
         MessagePackSerializer? messagePackSerializer = null)
     {
         ArgumentNullException.ThrowIfNull(messagePackTypes);
+        services.TryAddSingleton<MappedHubDocumentation>();
+        services.AddApiDocumentSource<SignalRDocumentSource>();
         var builder = services.AddSignalR().AddJsonConfiguration()
             .AddMessagePackConfiguration(messagePackTypes, messagePackSerializer);
         services.AddSingleton<HubExceptionFilter>();

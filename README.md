@@ -343,6 +343,73 @@ by Native AOT. They remain available for normal JIT deployments.
 See Microsoft's [SignalR Native AOT guidance](https://learn.microsoft.com/aspnet/core/release-notes/aspnetcore-9.0#signalr-supports-trimming-and-native-aot)
 and [configuration source generator documentation](https://learn.microsoft.com/dotnet/core/extensions/configuration-generator).
 
+## AsyncAPI documentation
+
+Implement `IDocumentedHubEndpoint` instead of applying attributes to the hub:
+
+```csharp
+using Asp.Versioning;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.SignalR;
+using PANiXiDA.Core.ApiDocumentation;
+using PANiXiDA.Core.Presentation.SignalR.Hubs;
+
+public sealed class MatchmakingHub : Hub, IDocumentedHubEndpoint
+{
+    public static string Name => "matchmaking";
+    public static string Summary => "Matchmaking";
+    public static ApiVersion ApiVersion => new(1, 0);
+    public static IReadOnlyDictionary<string, ApiOperationMetadata> Operations { get; } =
+        new Dictionary<string, ApiOperationMetadata>
+        {
+            [nameof(GetState)] = new(Name: "GetSearchState")
+        };
+
+    public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) =>
+        hubs.MapHub<MatchmakingHub>("/hubs/v1/matchmaking")
+            .RequireAuthorization()
+            .WithOperation(nameof(GetState), summary: "Returns the current search state.");
+
+    [EndpointName("ReadSearchState")]
+    [EndpointSummary("Reads search state by identifier.")]
+    public Task<SearchState> GetState(Guid searchId) => Task.FromResult(new SearchState(searchId));
+}
+
+public sealed record SearchState(Guid SearchId);
+```
+
+`Name` identifies the module; `Summary` supplies its display title. `ApiVersion` comes from `Asp.Versioning.Abstractions`. `IsDeprecated` defaults to false. Existing `IHubEndpoint` implementations remain valid without documentation.
+
+Operation names and summaries are resolved independently, in this order: Map builder overrides, `Operations`, standard `EndpointName`/`EndpointSummary` attributes, XML summary and CLR method name. `Operations` defaults to empty. Null summaries inherit lower-priority descriptions; an empty string clears them. Entries use CLR method names through `nameof`, even when `HubMethodName` changes the wire target. Display names never change client calls or stable document IDs.
+
+Messages and replies use the resolved operation name for display titles: `GetState request`, `GetState response`, `Watch stream`, `Upload / updates stream`, or `Changed notification`. Typed callbacks returning a value use request/response titles. Technical message names, component keys, references, and payload schemas stay unchanged.
+
+Each mapped hub path has one channel shared by invocations, callbacks, streams, and replies. Replies stay under their operation's `Replies` section. Multiple hubs with the same `Name`, `Summary`, and `ApiVersion` share a document; different paths remain separate channels and different modules or versions remain separate documents.
+
+Typed callbacks use `client.MethodName` keys in `Operations` and `WithClientOperation(nameof(IClient.MethodName), name: ..., summary: ...)` in Map. Unknown method/callback names fail explicitly. Dictionaries are snapshotted per hub; builder overrides belong to the mapped path.
+
+The generator discovers inherited methods, async results, typed callbacks and both streaming directions without runtime reflection discovery. Hub lifecycle methods are excluded. Typed client callbacks named `Dispose` remain documented. DI parameters, streaming cancellation tokens and trailing callback cancellation tokens are excluded. Unsupported method signatures or duplicate targets produce a build diagnostic.
+
+Custom awaitables supported by the SignalR dispatcher, such as the return value of `ConfigureAwait`, are documented using their awaited result. Use `Task` or `ValueTask` for Native AOT hub methods.
+
+Register generated JSON metadata for arguments, results and stream items, then connect the independent presenter:
+
+```csharp
+builder.Services.AddSignalR(builder.Configuration);
+builder.Services.AddApiDocumentation(builder.Configuration, ApplicationJsonContext.Default);
+var app = builder.Build();
+app.UseSignalR(typeof(MatchmakingHub).Assembly);
+app.UseApiDocumentation();
+```
+
+The host uses the SignalR and `PANiXiDA.Core.Presentation.Scalar.DependencyInjection` namespaces. `ApplicationJsonContext` is an application-owned `[JsonSerializable]` context; configure SignalR JSON resolvers and MessagePack shapes for the same payloads as usual. Missing schema metadata fails without reflection fallback.
+
+`/asyncapi/matchmaking-signalr-v1.json` contains actual paths, arguments, replies, callbacks and streams. `x-signalr` bindings report targets, protocols, mapped transports and authorization, including the fallback policy configured in `AuthorizationOptions`. JSON envelopes contain generated payload schemas. Completion errors remain strings. MessagePack uses its binary protocol encoding. Untyped `Clients.SendAsync` calls require a custom document source because their runtime target strings cannot be inferred reliably.
+
+Versions describe documents; routes and transport negotiation remain application-owned. ASP.NET Core restrictions for `Hub<TClient>` and value-type upload streams remain.
+
 ## Project Structure
 
 ```text
@@ -388,9 +455,10 @@ package source, shared build settings, README and icon.
 
 The NuGet package includes the `net10.0` library, its `netstandard2.0` source
 generator under `analyzers/dotnet/cs`, XML documentation, README,
-license metadata, icon and repository metadata. Redis integration,
-`PANiXiDA.Core.ResultPattern`, and `Nerdbank.MessagePack.SignalR` are runtime
-package dependencies. PolyType supplies the MessagePack type shape generator;
+license metadata, icon and repository metadata. Runtime dependencies include
+Redis integration, `Asp.Versioning.Abstractions`, `PANiXiDA.Core.ApiDocumentation`,
+`PANiXiDA.Core.ResultPattern`, and `Nerdbank.MessagePack.SignalR`.
+PolyType supplies the MessagePack type shape generator.
 Microsoft's SignalR Client, MessagePack protocol, and Testcontainers are test-only.
 A symbols package is produced by the repository's packaging settings.
 

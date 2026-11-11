@@ -4,11 +4,13 @@
         <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
     </PropertyGroup>
     <ItemGroup>
+        <PackageVersion Include="Asp.Versioning.Abstractions" Version="10.2.1" />
         <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
         <PackageVersion Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="10.0.14" />
         <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.14" />
         <PackageVersion Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="10.0.14" />
         <PackageVersion Include="Nerdbank.MessagePack.SignalR" Version="1.4.104" />
+        <PackageVersion Include="PANiXiDA.Core.ApiDocumentation" Version="1.0.2" />
         <PackageVersion Include="PANiXiDA.Core.ResultPattern" Version="1.0.4" />
         <PackageVersion Include="Testcontainers" Version="4.15.0" />
         <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.0.4" />

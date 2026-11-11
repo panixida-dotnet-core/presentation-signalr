@@ -58,11 +58,13 @@ public sealed class HubRegistrationGenerator : IIncrementalGenerator
         }
 
         var hubs = new List<INamedTypeSymbol>();
-        var seen = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
-        foreach (var type in candidates.OrderBy(GetRuntimeName, StringComparer.Ordinal))
+        var documentedHubs = new List<INamedTypeSymbol>();
+        foreach (var type in candidates.Distinct<INamedTypeSymbol>(SymbolEqualityComparer.Default).OrderBy(GetRuntimeName, StringComparer.Ordinal))
         {
             context.CancellationToken.ThrowIfCancellationRequested();
-            if (!seen.Add(type) || !type.AllInterfaces.Any(item => SymbolEqualityComparer.Default.Equals(item, contract)))
+            var mapped = type.AllInterfaces.Any(item => SymbolEqualityComparer.Default.Equals(item, contract));
+            var documented = IsHub(type) && HubDocumentationEmitter.HasContract(type);
+            if (!mapped && !documented)
             {
                 continue;
             }
@@ -79,10 +81,18 @@ public sealed class HubRegistrationGenerator : IIncrementalGenerator
                 continue;
             }
 
-            hubs.Add(type);
+            if (mapped)
+            {
+                hubs.Add(type);
+            }
+
+            if (documented)
+            {
+                documentedHubs.Add(type);
+            }
         }
 
-        context.AddSource("HubRegistrations.g.cs", SourceText.From(BuildSource(hubs), Encoding.UTF8));
+        context.AddSource("HubRegistrations.g.cs", SourceText.From(BuildSource(hubs, documentedHubs, context), Encoding.UTF8));
     }
 
     private static bool IsHub(INamedTypeSymbol type)
@@ -123,7 +133,7 @@ public sealed class HubRegistrationGenerator : IIncrementalGenerator
             : type.ContainingNamespace.ToDisplayString() + "." + type.MetadataName;
     }
 
-    private static string BuildSource(List<INamedTypeSymbol> hubs)
+    private static string BuildSource(List<INamedTypeSymbol> hubs, List<INamedTypeSymbol> documentedHubs, SourceProductionContext context)
     {
         var mappings = new StringBuilder();
         foreach (var hub in hubs)
@@ -147,6 +157,7 @@ public sealed class HubRegistrationGenerator : IIncrementalGenerator
                     global::{{RegistryName}}.RegisterAssembly(
                         typeof(GeneratedHubRegistrations).Assembly,
                         MapHubs);
+            {{HubDocumentationEmitter.Build(documentedHubs, context)}}
                 }
 
                 private static void MapHubs(global::PANiXiDA.Core.Presentation.SignalR.Hubs.HubMapBuilder hubs)

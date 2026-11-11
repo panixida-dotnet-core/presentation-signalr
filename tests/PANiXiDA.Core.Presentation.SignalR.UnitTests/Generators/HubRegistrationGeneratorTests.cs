@@ -151,7 +151,7 @@ public sealed class HubRegistrationGeneratorTests
             app.UseSignalR(external, local, local);
 
             HubEndpoints(app).Select(endpoint => endpoint.RoutePattern.RawText)
-                .ShouldBe(["/external", "/hubs/other", "/hubs/events"]);
+            .ShouldBe(["/external", "/v1/state", "/v2/state", "/metadata", "/secondary", "/hubs/other", "/hubs/events"]);
         }
         finally
         {
@@ -221,6 +221,195 @@ public sealed class HubRegistrationGeneratorTests
         }
     }
 
+    [Theory(DisplayName = "Documentation handles async return shapes inherited attributes callbacks arrays and dynamic payloads")]
+    [InlineData("object")]
+    [InlineData("string[]")]
+    public void Generate_ShouldCoverStandardContractShapes(string untypedClient)
+    {
+        var source = $$"""
+            using Microsoft.AspNetCore.SignalR;
+            using PANiXiDA.Core.Presentation.SignalR.Hubs;
+            using System.Threading.Tasks;
+            using System.Threading.Channels;
+            using System.Collections.Generic;
+            public sealed class Sequence : IAsyncEnumerable<string> { public IAsyncEnumerator<string> GetAsyncEnumerator(System.Threading.CancellationToken token = default) => null!; }
+            public abstract class DerivedReader : ChannelReader<string> { }
+            public interface IClient { Task Changed([Microsoft.AspNetCore.Mvc.FromServices] string state, System.Threading.CancellationToken cancellationToken); Task<int> Prompt(); Task NonTrailing(System.Threading.CancellationToken token, int value); }
+            public abstract class Parent : Hub<IClient>
+            {
+                [Microsoft.AspNetCore.Authorization.Authorize]
+                [HubMethodName("inherited")]
+                public virtual Task<string> Read() => Task.FromResult("state");
+            }
+            public class Documented : Parent, IDocumentedHubEndpoint
+            {
+                {{ContractMembers("Documented")}}
+                /// <remarks>Method documentation without a summary.</remarks>
+                public override Task<string> Read() => base.Read();
+                public ValueTask Nothing() => ValueTask.CompletedTask;
+                public ValueTask<string> Value() => new("value");
+                public Task<int[]> Array() => Task.FromResult(new[] { 1 });
+                public ChannelReader<string> Watch(System.Threading.CancellationToken cancellationToken) => Channel.CreateUnbounded<string>().Reader;
+                public IAsyncEnumerable<string> Updates() => null!;
+                public Task Upload(ChannelReader<string> items) => Task.CompletedTask;
+                public void ReadKeyed([Microsoft.Extensions.DependencyInjection.FromKeyedServices("key")] object service) { }
+                public void Decorated([System.Runtime.InteropServices.Optional] string value) { }
+                public dynamic Echo(dynamic value) => value;
+                public List<string> Values(List<string> values) => values;
+                public Sequence CustomStream() => new();
+                public Task<DerivedReader> DerivedStream() => Task.FromResult<DerivedReader>(null!);
+                public void TokenAsData(System.Threading.CancellationToken token, int value) { }
+                public int Dispose(int value) => value;
+                protected void Hidden() { }
+                public static void Static() { }
+                public string Property { get; set; } = "";
+            }
+            public class UntypedClient : Hub<{{untypedClient}}>, IDocumentedHubEndpoint { {{ContractMembers("UntypedClient", "other")}} public void Run() { } }
+            """;
+        var (result, _) = Compile(source);
+        var generated = result.GeneratedTrees.Single().ToString();
+        generated.ShouldContain("\"inherited\"");
+        generated.ShouldContain("requiresAuthorization: true");
+        generated.ShouldContain("typeof(global::System.Object)");
+        generated.ShouldNotContain("typeof(global::Sequence)");
+        generated.ShouldNotContain("typeof(global::DerivedReader)");
+        generated.ShouldNotContain("HubParameterDescription(\"service\"");
+        generated.ShouldNotContain("\"Hidden\"");
+        generated.ShouldNotContain("\"Static\"");
+    }
+
+    [Fact(DisplayName = "Inherited client disposal callbacks are documented while hub disposal stays excluded")]
+    public void Generate_ShouldPreserveClientDispose()
+    {
+        var source = $$"""
+            using Microsoft.AspNetCore.SignalR;
+            using PANiXiDA.Core.Presentation.SignalR.Hubs;
+            public interface IBaseClient { System.Threading.Tasks.Task Dispose(); }
+            public interface IClient : IBaseClient { }
+            public class Documented : Hub<IClient>, IDocumentedHubEndpoint
+            {
+                {{ContractMembers("Documented")}}
+                public new void Dispose() => base.Dispose();
+            }
+            """;
+
+        var (result, _) = Compile(source);
+
+        var generated = result.GeneratedTrees.Single().ToString();
+        generated.ShouldContain("MemberName = \"Dispose\"");
+        generated.ShouldContain("isClientMethod: true");
+        generated.ShouldNotContain("isClientMethod: false");
+    }
+
+    [Fact(DisplayName = "Overrides with different nullable annotations are documented once")]
+    public void Generate_ShouldIgnoreNullableAnnotationsInOverrides()
+    {
+        var source = $$"""
+            using System.Collections.Generic;
+            using Microsoft.AspNetCore.SignalR;
+            using PANiXiDA.Core.Presentation.SignalR.Hubs;
+            public abstract class Parent : Hub
+            {
+                public virtual void Send(List<string> value) { }
+            }
+            public class Documented : Parent, IDocumentedHubEndpoint
+            {
+                {{ContractMembers("Documented")}}
+                public override void Send(List<string?>? value) { }
+            }
+            """;
+
+        var (result, _) = Compile(source);
+
+        result.GeneratedTrees.Single().ToString().Split("MemberName = \"Send\"").Length.ShouldBe(2);
+    }
+
+    [Theory(DisplayName = "Documented typed callbacks reject unsupported streaming signatures")]
+    [InlineData("System.Threading.Tasks.Task Watch(System.Collections.Generic.IAsyncEnumerable<string> values);")]
+    [InlineData("System.Collections.Generic.IAsyncEnumerable<string> Watch();")]
+    public void Generate_ShouldRejectStreamingClientCallbacks(string method)
+    {
+        Compile("public interface IClient { " + method + " } " + DocumentedSource(string.Empty, "Microsoft.AspNetCore.SignalR.Hub<IClient>"), "PANSIGNALRSG003");
+    }
+
+    [Fact(DisplayName = "Awaiter metadata resolves inherited awaitables and preserves ordinary payload types")]
+    public void Generate_ShouldDistinguishAwaitablesFromPayloads()
+    {
+        var source = $$"""
+            using System;
+            using System.Runtime.CompilerServices;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.SignalR;
+            using PANiXiDA.Core.Presentation.SignalR.Hubs;
+            public class AwaitableBase
+            {
+                public TaskAwaiter<int> GetAwaiter() => Task.FromResult(42).GetAwaiter();
+            }
+            public class Awaitable : AwaitableBase { }
+            public class PayloadWithOverloads
+            {
+                public TaskAwaiter<int> GetAwaiter(int value) => Task.FromResult(value).GetAwaiter();
+                public static TaskAwaiter<int> GetAwaiter() => Task.FromResult(42).GetAwaiter();
+                public TaskAwaiter<int> GetAwaiter<T>() => Task.FromResult(42).GetAwaiter();
+            }
+            public class PayloadWithoutNotification
+            {
+                public object GetAwaiter() => new object();
+            }
+            public class PayloadWithoutCompletionFlag
+            {
+                public Awaiter GetAwaiter() => new Awaiter();
+                public class Awaiter : INotifyCompletion
+                {
+                    public int IsCompleted => 1;
+                    public int GetResult() => 42;
+                    public void OnCompleted(Action continuation) => continuation();
+                }
+            }
+            public class PayloadWithoutResult
+            {
+                public Awaiter GetAwaiter() => new Awaiter();
+                public class Awaiter : INotifyCompletion
+                {
+                    public bool IsCompleted => true;
+                    public void OnCompleted(Action continuation) => continuation();
+                }
+            }
+            public class Documented : Hub, IDocumentedHubEndpoint
+            {
+                {{ContractMembers("Documented")}}
+                public Awaitable Read() => new Awaitable();
+                public PayloadWithOverloads Overloads() => new PayloadWithOverloads();
+                public PayloadWithoutNotification NoNotification() => new PayloadWithoutNotification();
+                public PayloadWithoutCompletionFlag NoCompletionFlag() => new PayloadWithoutCompletionFlag();
+                public PayloadWithoutResult NoResult() => new PayloadWithoutResult();
+            }
+            """;
+
+        var (result, _) = Compile(source);
+
+        var generated = result.GeneratedTrees.Single().ToString();
+        generated.ShouldContain("typeof(int)");
+        generated.ShouldNotContain("typeof(global::Awaitable)");
+        generated.ShouldContain("typeof(global::PayloadWithOverloads)");
+        generated.ShouldContain("typeof(global::PayloadWithoutNotification)");
+        generated.ShouldContain("typeof(global::PayloadWithoutCompletionFlag)");
+        generated.ShouldContain("typeof(global::PayloadWithoutResult)");
+    }
+
+    [Fact(DisplayName = "Generator tolerates incomplete attributes without replacing compiler diagnostics")]
+    public void Generate_ShouldTolerateIncompleteCode()
+    {
+        var (result, _) = Compile("""
+            public class Incomplete : Microsoft.AspNetCore.SignalR.Hub, PANiXiDA.Core.Presentation.SignalR.Hubs.IDocumentedHubEndpoint { }
+            public class Documented : Microsoft.AspNetCore.SignalR.Hub, PANiXiDA.Core.Presentation.SignalR.Hubs.IDocumentedHubEndpoint
+            {
+                [Unknown]
+                public void Run([Unknown] string value) { }
+            }
+            """, allowCompilationErrors: true);
+        result.Results.Single().Exception.ShouldBeNull();
+    }
     private static WebApplication CreateApplication()
     {
         var builder = WebApplication.CreateSlimBuilder();
@@ -228,6 +417,95 @@ public sealed class HubRegistrationGeneratorTests
         builder.Services.AddSignalR();
         return builder.Build();
     }
+
+    [Fact(DisplayName = "Documentation generator reads interface contracts inherited callbacks summaries and explicit service parameters")]
+    public void Generate_ShouldDescribeDocumentedContracts()
+    {
+        var source = $$"""
+            using Microsoft.AspNetCore.SignalR;
+            using PANiXiDA.Core.Presentation.SignalR.Hubs;
+            public interface IBaseClient { System.Threading.Tasks.Task Changed(string state); }
+            public interface IClient : IBaseClient { }
+            public class Documented : Hub<IClient>, IDocumentedHubEndpoint
+            {
+                {{ContractMembers("Documented", "matches", 2)}}
+                /// <summary>Reads the current state.</summary>
+                [HubMethodName("read")]
+                public System.Threading.Tasks.ValueTask<string> Read(
+                    string id, [Microsoft.AspNetCore.Mvc.FromServices] System.IDisposable service) => new(id);
+                public override System.Threading.Tasks.Task OnConnectedAsync() => base.OnConnectedAsync();
+                public override string ToString() => "hub";
+                private string Hidden() => "hidden";
+            }
+            """;
+        var (result, _) = Compile(source);
+        var generated = result.GeneratedTrees.Single().ToString();
+        generated.ShouldContain("HubDocumentationRegistry.RegisterHub<global::Documented>");
+        generated.ShouldContain("MemberName = \"Read\"");
+        generated.ShouldContain("\"read\"");
+        generated.ShouldContain("isClientMethod: true");
+        generated.ShouldContain("\"Changed\"");
+        generated.ShouldNotContain("HubParameterDescription(\"service\"");
+        generated.ShouldNotContain("\"OnConnectedAsync\"");
+        generated.ShouldNotContain("\"ToString\"");
+        generated.ShouldNotContain("GetMethods(");
+    }
+
+    [Theory(DisplayName = "Documented hubs report unsupported generic methods and overloaded targets at compile time")]
+    [InlineData("public void Read<T>(T value) { }")]
+    [InlineData("public void Read(ref int value) { }")]
+    [InlineData("public unsafe void Read(int* value) { }")]
+    [InlineData("public unsafe void Read(delegate*<void> value) { }")]
+    [InlineData("public void Read(System.Span<int> value) { }")]
+    [InlineData("public System.ReadOnlySpan<int> Read() => default;")]
+    [InlineData("private int value; public ref int Read() => ref value;")]
+    [InlineData("private int value; public ref readonly int Read() => ref value;")]
+    [InlineData("public void Read(string value) { } public void Read(int value) { }")]
+    public void Generate_ShouldDiagnoseUnsupportedDocumentedMethods(string methods)
+    {
+        Compile(DocumentedSource(methods), "PANSIGNALRSG003");
+    }
+
+    [Theory(DisplayName = "Standard endpoint attributes generate display metadata independently of wire names")]
+    [InlineData("\"Readable operation\"", "\"Readable description\"", "Readable operation", "Readable description")]
+    [InlineData("null", "null", "Read", "XML fallback")]
+    public void Generate_ShouldReadEndpointAttributes(string name, string summary, string expectedName, string expectedSummary)
+    {
+        var (result, _) = Compile(DocumentedSource($$"""
+            /// <summary>XML fallback</summary>
+            [Microsoft.AspNetCore.SignalR.HubMethodName("wire-read")]
+            [Microsoft.AspNetCore.Routing.EndpointName({{name}})]
+            [Microsoft.AspNetCore.Http.EndpointSummary({{summary}})]
+            public string Read() => "state";
+            """));
+
+        var generated = result.GeneratedTrees.Single().ToString();
+        generated.ShouldContain("HubMethodDescription(\"wire-read\"");
+        generated.ShouldContain("MemberName = \"Read\"");
+        generated.ShouldContain($"ApiOperationMetadata(\"{expectedName}\", \"{expectedSummary}\")");
+    }
+
+    [Fact(DisplayName = "Empty endpoint names produce a compile-time diagnostic")]
+    public void Generate_ShouldRejectEmptyDisplayNames()
+    {
+        Compile(DocumentedSource("""[Microsoft.AspNetCore.Routing.EndpointName(" ")] public void Read() { }"""),
+            "PANSIGNALRSG004");
+    }
+
+    private static string DocumentedSource(string methods, string baseType = "Microsoft.AspNetCore.SignalR.Hub") => $$"""
+        public class Documented : {{baseType}}, PANiXiDA.Core.Presentation.SignalR.Hubs.IDocumentedHubEndpoint
+        {
+            {{ContractMembers("Documented")}}
+            {{methods}}
+        }
+        """;
+
+    private static string ContractMembers(string typeName, string module = "module", int major = 1) => $$"""
+        public static string Name => "{{module}}";
+        public static string Summary => "{{module}}";
+        public static Asp.Versioning.ApiVersion ApiVersion => new({{major}}, 0);
+        public static Microsoft.AspNetCore.Builder.HubEndpointConventionBuilder Map(PANiXiDA.Core.Presentation.SignalR.Hubs.HubMapBuilder hubs) => hubs.MapHub<{{typeName}}>("/generated");
+        """;
 
     private static RouteEndpoint[] HubEndpoints(WebApplication app)
     {
@@ -250,7 +528,7 @@ public sealed class HubRegistrationGeneratorTests
     private static (GeneratorDriverRunResult Result, Compilation Compilation) Compile(
         string source,
         string? expectedDiagnostic = null,
-        bool includeRuntime = true)
+        bool includeRuntime = true, bool allowCompilationErrors = false)
     {
         var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
         var references = ReferencePaths
@@ -259,12 +537,15 @@ public sealed class HubRegistrationGeneratorTests
         var compilation = CSharpCompilation.Create("GeneratedHubs_" + Guid.NewGuid().ToString("N"),
             [CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: TestContext.Current.CancellationToken)],
             references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable, allowUnsafe: true));
         var driver = CSharpGeneratorDriver.Create([new HubRegistrationGenerator().AsSourceGenerator()], parseOptions: parseOptions)
             .RunGeneratorsAndUpdateCompilation(compilation, out var updated, out var diagnostics, TestContext.Current.CancellationToken);
         diagnostics.Select(diagnostic => diagnostic.Id).ShouldBe(expectedDiagnostic is null ? [] : [expectedDiagnostic]);
-        updated.GetDiagnostics(TestContext.Current.CancellationToken)
-            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        if (!allowCompilationErrors)
+        {
+            updated.GetDiagnostics(TestContext.Current.CancellationToken)
+                .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        }
         return (driver.GetRunResult(), updated);
     }
 }
