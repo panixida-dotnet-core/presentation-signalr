@@ -193,7 +193,6 @@ public sealed class GeneratedPayloadSchemaTests
     }
 }
 
-#pragma warning disable CA1822 // Hub methods are instance endpoints.
 public sealed class GeneratedSchemaHub : Hub, IDocumentedHubEndpoint
 {
     public static string Name => "generated";
@@ -232,7 +231,6 @@ public sealed class ConverterSchemaHub : Hub, IDocumentedHubEndpoint
 
     public ConverterSchemaState Read() => ConverterSchemaState.Ready;
 }
-#pragma warning restore CA1822
 
 public sealed record GeneratedSchemaPayload(Guid? GameId, DateTimeOffset? QueuedAt,
     [property: JsonPropertyName("name")] string DisplayName, IReadOnlyList<int?> Scores,
