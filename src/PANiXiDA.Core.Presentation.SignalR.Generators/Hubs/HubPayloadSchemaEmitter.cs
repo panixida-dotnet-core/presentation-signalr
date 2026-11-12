@@ -101,10 +101,10 @@ internal sealed class HubPayloadSchemaEmitter(bool isOutput)
         return $"new {SchemaType}(static naming => {schema}, {string.Join(", ", types)})";
     }
 
-    private string? Build(ITypeSymbol type, bool isCollectionElement = false)
+    private string? Build(ITypeSymbol type, bool enforceReferenceNullability = false)
     {
         _types.Add(type);
-        var nullable = type.IsReferenceType && (isCollectionElement || type.NullableAnnotation != NullableAnnotation.NotAnnotated);
+        var nullable = type.IsReferenceType && (!enforceReferenceNullability || type.NullableAnnotation != NullableAnnotation.NotAnnotated);
         if (type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } optional)
         {
             type = optional.TypeArguments[0];
@@ -161,7 +161,7 @@ internal sealed class HubPayloadSchemaEmitter(bool isOutput)
 
     private string? Array(ITypeSymbol itemType, bool nullable)
     {
-        return Build(itemType, isCollectionElement: true) is { } item
+        return Build(itemType) is { } item
             ? Object(("type", TypeValue("array", nullable)), ("items", item))
             : null;
     }
@@ -169,7 +169,7 @@ internal sealed class HubPayloadSchemaEmitter(bool isOutput)
     private string? Dictionary(INamedTypeSymbol type, bool nullable)
     {
         var key = type.TypeArguments[0];
-        if (key.SpecialType != SpecialType.System_String || Build(type.TypeArguments[1], isCollectionElement: true) is not { } value)
+        if (key.SpecialType != SpecialType.System_String || Build(type.TypeArguments[1]) is not { } value)
         {
             return null;
         }
@@ -200,7 +200,8 @@ internal sealed class HubPayloadSchemaEmitter(bool isOutput)
                 continue;
             }
 
-            if (HasCustomContract(property) || Build(property.Type) is not { } schema)
+            var enforceReferenceNullability = property.OriginalDefinition.Type.TypeKind != TypeKind.TypeParameter;
+            if (HasCustomContract(property) || Build(property.Type, enforceReferenceNullability) is not { } schema)
             {
                 return null;
             }

@@ -205,7 +205,7 @@ JSON uses `NumberHandling.Strict`, `RespectRequiredConstructorParameters = true`
 and `RespectNullableAnnotations = true`, independently of HTTP and MessagePack.
 Missing constructor arguments without defaults (including nullable ones) and
 explicit nulls for non-nullable members are rejected. Invalid non-nullable output
-also fails serialization. Collection-element and generic nullability are not checked.
+also fails serialization. The root value, collection elements and generic members permit null for reference types.
 
 Customize JSON through `AddJsonProtocol`; existing resolvers and converters are
 preserved. Native AOT requires a `JsonSerializerContext` covering all payload
@@ -394,7 +394,7 @@ The generator discovers inherited methods, async results, typed callbacks and bo
 
 Custom awaitables supported by the SignalR dispatcher, such as the return value of `ConfigureAwait`, are documented using their awaited result. Use `Task` or `ValueTask` for Native AOT hub methods.
 
-Connect the independent presenter. The hub generator supplies schemas for ordinary payloads. Reference-type collection elements and dictionary values allow null. Request and reply schemas account for JSON properties ignored on read or write:
+Connect the independent presenter. The hub generator supplies schemas for ordinary payloads. Root reference values, collection elements, dictionary values and properties declared as generic type parameters allow null. Request and reply schemas account for JSON properties ignored on read or write:
 
 ```csharp
 builder.Services.AddSignalR(builder.Configuration);

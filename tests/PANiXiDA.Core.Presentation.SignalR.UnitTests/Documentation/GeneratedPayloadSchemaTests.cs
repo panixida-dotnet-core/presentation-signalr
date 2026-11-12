@@ -52,7 +52,7 @@ public sealed class GeneratedPayloadSchemaTests
             .ShouldBe(properties.Select(property => property.Key), ignoreOrder: true);
     }
 
-    [Fact(DisplayName = "Closed generic DTOs preserve nested shapes and the selected JSON constructor's required members")]
+    [Fact(DisplayName = "Generated request and reply schemas respect nullability and directional JSON contracts")]
     public async Task GeneratesSchemasForConstructedTypesAndRequiredMembers()
     {
         var builder = WebApplication.CreateSlimBuilder();
@@ -66,7 +66,12 @@ public sealed class GeneratedPayloadSchemaTests
         var input = request["payload"]!["schema"]!["properties"]!["arguments"]!["prefixItems"]![0]!;
         var output = GetResultSchema(document);
 
-        var inputPayload = input["properties"]!["value"]!["properties"]!["value"]!;
+        input["type"]!.AsArray().Select(item => item!.GetValue<string>()).ShouldBe(["object", "null"]);
+        output["type"]!.AsArray().Select(item => item!.GetValue<string>()).ShouldBe(["object", "null"]);
+        var inputBox = input["properties"]!["value"]!;
+        inputBox["type"]!.AsArray().Select(item => item!.GetValue<string>()).ShouldBe(["object", "null"]);
+        var inputPayload = inputBox["properties"]!["value"]!;
+        inputPayload["type"]!.AsArray().Select(item => item!.GetValue<string>()).ShouldBe(["object", "null"]);
         inputPayload["properties"]!["name"]!["type"]!.GetValue<string>().ShouldBe("string");
         inputPayload["properties"]!["readOnly"].ShouldBeNull();
         inputPayload["properties"]!["writeOnly"].ShouldNotBeNull();
