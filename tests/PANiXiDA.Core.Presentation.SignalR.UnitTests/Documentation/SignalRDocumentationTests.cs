@@ -74,7 +74,7 @@ public sealed class SignalRDocumentationTests
         reply["title"]!.GetValue<string>().ShouldBe("Read response");
         reply["payload"]!["schema"]!["oneOf"]![0]!["properties"]!["result"]!["properties"]!["state"].ShouldNotBeNull();
         reply["payload"]!["schema"]!["oneOf"]![1]!["properties"]!["error"]!["type"]!.GetValue<string>().ShouldBe("string");
-        operations.Any(operation => operation.Key.Contains("Hidden", StringComparison.Ordinal)).ShouldBeFalse();
+        operations.Any(operation => operation.Key.Contains("GetUpdates", StringComparison.Ordinal)).ShouldBeFalse();
         operations.Any(operation => operation.Key.Contains("OnConnected", StringComparison.Ordinal)).ShouldBeFalse();
         operations.Single(operation => operation.Key.Contains("client.Changed@", StringComparison.Ordinal)).Value!["action"]!.GetValue<string>().ShouldBe("send");
         operations.Single(operation => operation.Key.Contains("hub.Watch@", StringComparison.Ordinal)).Value!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
@@ -92,7 +92,7 @@ public sealed class SignalRDocumentationTests
         bulk["payload"]!["schema"]!["properties"]!["arguments"]!["minItems"]!.GetValue<int>().ShouldBe(1);
         var uploadReply = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.Upload@/v1/state.result", StringComparison.Ordinal)).Value!;
         uploadReply["payload"]!["schema"]!["oneOf"]![0]!["properties"]!["result"]!["type"]!.GetValue<string>().ShouldBe("null");
-        operations.Single(operation => operation.Key.Contains("hub.WatchDerived@", StringComparison.Ordinal)).Value!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
+        operations.Single(operation => operation.Key.Contains($"hub.{nameof(IDerivedDocumentationStream.WatchDerived)}@", StringComparison.Ordinal)).Value!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
         var v2 = source.Generate("matchmaking-signalr-v2", TestContext.Current.CancellationToken);
         v2["info"]!["x-deprecated"]!.GetValue<bool>().ShouldBeTrue();
         var configured = v2["components"]!["messages"]!.AsObject().Single(message =>
@@ -262,8 +262,15 @@ public sealed class SignalRDocumentationTests
     public sealed class PlainHub : Hub;
 }
 
-public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHubEndpoint
+internal interface IDerivedDocumentationStream
 {
+    Task<DerivedDocumentationReader> WatchDerived();
+}
+
+public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHubEndpoint, IDerivedDocumentationStream
+{
+    private static readonly object UpdatesKey = new();
+
     public static string Name => "matchmaking";
 
     public static string Summary => "Matchmaking";
@@ -274,18 +281,43 @@ public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHub
 
     /// <summary>Reads current state.</summary>
     [HubMethodName("read-state")]
-    public Task<DocumentationPayload> Read([Microsoft.AspNetCore.Mvc.FromQuery] Guid id, DocumentationDependency dependency) =>
-        Task.FromResult(new DocumentationPayload(id, "searching"));
+    public Task<DocumentationPayload> Read([Microsoft.AspNetCore.Mvc.FromQuery] Guid id, DocumentationDependency dependency)
+    {
+        Context.ConnectionAborted.ThrowIfCancellationRequested();
+        return Task.FromResult(new DocumentationPayload(id, dependency.State));
+    }
 
-    public ChannelReader<DocumentationPayload> Watch(CancellationToken cancellationToken) => Channel.CreateUnbounded<DocumentationPayload>().Reader;
+    public ChannelReader<DocumentationPayload> Watch(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var channel = Channel.CreateUnbounded<DocumentationPayload>();
+        foreach (var update in GetUpdates())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            channel.Writer.TryWrite(update);
+        }
 
-    public Task Upload(IAsyncEnumerable<DocumentationPayload> updates) => Task.CompletedTask;
+        channel.Writer.Complete();
+        return channel.Reader;
+    }
+
+    public async Task Upload(IAsyncEnumerable<DocumentationPayload> updates)
+    {
+        var received = new List<DocumentationPayload>();
+        await foreach (var update in updates.WithCancellation(Context.ConnectionAborted))
+        {
+            received.Add(update);
+        }
+
+        Bulk(received);
+    }
 
     public Task<DerivedDocumentationReader> WatchDerived() => Task.FromResult<DerivedDocumentationReader>(null!);
 
-    public void Bulk(IEnumerable<DocumentationPayload> values) { }
+    public void Bulk(IEnumerable<DocumentationPayload> values) => Context.Items[UpdatesKey] = values.ToArray();
 
-    private string Hidden() => "hidden";
+    private DocumentationPayload[] GetUpdates() =>
+        Context.Items.TryGetValue(UpdatesKey, out var value) && value is DocumentationPayload[] updates ? updates : [];
 }
 
 public sealed class DocumentationV2Hub : Hub, IDocumentedHubEndpoint
@@ -300,8 +332,11 @@ public sealed class DocumentationV2Hub : Hub, IDocumentedHubEndpoint
 
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<DocumentationV2Hub>("/v2/state");
 
-    public ConfiguredTaskAwaitable<DocumentationPayload> Read() =>
-        Task.FromResult(new DocumentationPayload(Guid.Empty, "ready")).ConfigureAwait(false);
+    public ConfiguredTaskAwaitable<DocumentationPayload> Read()
+    {
+        Context.ConnectionAborted.ThrowIfCancellationRequested();
+        return Task.FromResult(new DocumentationPayload(Guid.Empty, "ready")).ConfigureAwait(false);
+    }
 }
 
 public interface IDocumentationClient
@@ -311,7 +346,10 @@ public interface IDocumentationClient
 
 public abstract class DerivedDocumentationReader : ChannelReader<DocumentationPayload>;
 
-public sealed class DocumentationDependency;
+public sealed class DocumentationDependency
+{
+    internal string State { get; } = "searching";
+}
 public sealed record DocumentationPayload(Guid Id, string State);
 
 [JsonSerializable(typeof(DocumentationDependency))]
