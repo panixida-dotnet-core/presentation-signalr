@@ -207,11 +207,7 @@ internal sealed class HubPayloadSchemaEmitter(bool isOutput)
 
             var name = PropertyName(property);
             properties.Add($"{{ {name}, {schema} }}");
-            var conditionallyOmitted = isOutput && ignoreCondition is JsonIgnoreWhenWritingDefault or JsonIgnoreWhenWritingNull;
-            if (!conditionallyOmitted && ((property.IsRequired && !setsRequiredMembers) ||
-                HasAttribute(property, JsonSerialization + "JsonRequiredAttribute") ||
-                constructorParameters.Any(parameter => StringComparer.OrdinalIgnoreCase.Equals(parameter.Name, property.Name) &&
-                    SymbolEqualityComparer.Default.Equals(parameter.Type, property.Type))))
+            if (IsRequired(property, ignoreCondition, setsRequiredMembers, constructorParameters))
             {
                 required.Add(name);
             }
@@ -222,6 +218,20 @@ internal sealed class HubPayloadSchemaEmitter(bool isOutput)
             ? Object(("type", TypeValue("object", nullable)), ("properties", propertiesExpression))
             : Object(("type", TypeValue("object", nullable)), ("properties", propertiesExpression),
                 ("required", $"new {JsonArrayType}({string.Join(", ", required)})"));
+    }
+
+    private bool IsRequired(IPropertySymbol property, int ignoreCondition, bool setsRequiredMembers,
+        IEnumerable<IParameterSymbol> constructorParameters)
+    {
+        if (isOutput && ignoreCondition is JsonIgnoreWhenWritingDefault or JsonIgnoreWhenWritingNull)
+        {
+            return false;
+        }
+
+        return (property.IsRequired && !setsRequiredMembers) ||
+            HasAttribute(property, JsonSerialization + "JsonRequiredAttribute") ||
+            constructorParameters.Any(parameter => StringComparer.OrdinalIgnoreCase.Equals(parameter.Name, property.Name) &&
+                SymbolEqualityComparer.Default.Equals(parameter.Type, property.Type));
     }
 
     private static List<IPropertySymbol>? GetProperties(INamedTypeSymbol type)
