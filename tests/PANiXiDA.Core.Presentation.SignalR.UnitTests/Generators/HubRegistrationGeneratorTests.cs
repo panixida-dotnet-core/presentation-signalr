@@ -151,7 +151,8 @@ public sealed class HubRegistrationGeneratorTests
             app.UseSignalR(external, local, local);
 
             HubEndpoints(app).Select(endpoint => endpoint.RoutePattern.RawText)
-                .ShouldBe(["/external", "/converter", "/v1/state", "/v2/state", "/generated", "/metadata", "/secondary", "/hubs/other", "/hubs/events"]);
+                .ShouldBe(["/external", "/constructed", "/converter", "/v1/state", "/v2/state", "/generated", "/metadata", "/secondary",
+                    "/hubs/other", "/hubs/events"]);
         }
         finally
         {
@@ -498,11 +499,22 @@ public sealed class HubRegistrationGeneratorTests
         const string declarations = """
             using System;
             using System.Collections.Generic;
+            using System.Diagnostics.CodeAnalysis;
             using System.Text.Json.Serialization;
 
             public sealed record Payload(Guid? Id, DateTimeOffset Date, bool Enabled, byte[] Data, string[] Tags,
                 IReadOnlyList<int?> Values, Dictionary<string, Member> Members, PayloadKind Kind, Member Field,
-                MemberWithConstructors Other, NamedMember? Named);
+                MemberWithConstructors Other, NamedMember? Named, Box<Box<Initialized>> Nested);
+
+            public sealed record Box<T>(T Value);
+
+            public sealed class Initialized
+            {
+                [SetsRequiredMembers]
+                public Initialized() { Name = "default"; }
+
+                public required string Name { get; init; }
+            }
 
             public enum PayloadKind { A, B }
 
@@ -571,6 +583,8 @@ public sealed class HubRegistrationGeneratorTests
             [JsonConverter(typeof(JsonStringEnumConverter<CustomKind>))]
             public enum CustomKind { A }
 
+            public sealed record ExpandingPayload<T>(ExpandingPayload<List<T>>? Next);
+
             public interface InterfacePayload { string Value { get; } }
             public abstract class AbstractPayload;
             public sealed class RecursivePayload { public RecursivePayload? Next { get; init; } }
@@ -598,6 +612,7 @@ public sealed class HubRegistrationGeneratorTests
             public InterfacePayload Interface() => null!;
             public AbstractPayload Abstract() => null!;
             public RecursivePayload Recursive() => null!;
+            public ExpandingPayload<int> Expanding() => null!;
             public Sequence Enumerable() => null!;
             public object Untyped() => null!;
             public System.Threading.CancellationToken Framework() => default;

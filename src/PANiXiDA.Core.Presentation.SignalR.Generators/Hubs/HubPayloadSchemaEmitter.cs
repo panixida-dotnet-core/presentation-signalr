@@ -12,6 +12,7 @@ internal sealed class HubPayloadSchemaEmitter
     private const string JsonInteger = "integer";
     private const string SchemaType = "global::PANiXiDA.Core.Presentation.SignalR.Documentation.HubPayloadSchema";
     private const int JsonIgnoreAlways = 1;
+    private const int MaxObjectDepth = 64;
 
     private static readonly HashSet<string> Dictionaries = new(StringComparer.Ordinal)
     {
@@ -143,13 +144,13 @@ internal sealed class HubPayloadSchemaEmitter
         if (type.IsAbstract || type.TypeKind == TypeKind.Interface ||
             typeNamespace == "System" || typeNamespace.StartsWith("System.", StringComparison.Ordinal) ||
             type.AllInterfaces.Any(item => item.SpecialType == SpecialType.System_Collections_IEnumerable) ||
-            !_objects.Add(type.OriginalDefinition))
+            _objects.Count >= MaxObjectDepth || !_objects.Add(type))
         {
             return null;
         }
 
         var result = BuildObject(type, nullable);
-        _objects.Remove(type.OriginalDefinition);
+        _objects.Remove(type);
         return result;
     }
 
@@ -182,7 +183,10 @@ internal sealed class HubPayloadSchemaEmitter
 
         var properties = new List<string>();
         var required = new List<string>();
-        var constructorParameters = RequiredConstructorParameters(type);
+        var constructor = GetJsonConstructor(type);
+        var constructorParameters = constructor?.Parameters.Where(parameter => !parameter.IsOptional) ?? [];
+        var setsRequiredMembers = constructor is not null &&
+            HasAttribute(constructor, "System.Diagnostics.CodeAnalysis.SetsRequiredMembersAttribute");
         foreach (var property in members)
         {
             if (HasCustomContract(property) || Build(property.Type) is not { } schema)
@@ -192,7 +196,7 @@ internal sealed class HubPayloadSchemaEmitter
 
             var name = PropertyName(property);
             properties.Add($"{{ {name}, {schema} }}");
-            if (property.IsRequired || HasAttribute(property, "JsonRequiredAttribute") ||
+            if ((property.IsRequired && !setsRequiredMembers) || HasAttribute(property, JsonSerialization + "JsonRequiredAttribute") ||
                 constructorParameters.Any(parameter => StringComparer.OrdinalIgnoreCase.Equals(parameter.Name, property.Name) &&
                     SymbolEqualityComparer.Default.Equals(parameter.Type, property.Type)))
             {
@@ -214,7 +218,7 @@ internal sealed class HubPayloadSchemaEmitter
         for (var current = type; current is not null; current = current.BaseType)
         {
             var members = current.GetMembers();
-            if (HasCustomContract(current) || members.Any(member => HasAttribute(member, "JsonIncludeAttribute")) ||
+            if (HasCustomContract(current) || members.Any(member => HasAttribute(member, JsonSerialization + "JsonIncludeAttribute")) ||
                 !AddProperties(members.OfType<IPropertySymbol>().Where(IsPublicInstanceProperty), properties, seen))
             {
                 return null;
@@ -254,9 +258,10 @@ internal sealed class HubPayloadSchemaEmitter
         !property.IsStatic && !property.IsIndexer && (property.GetMethod?.DeclaredAccessibility == Accessibility.Public ||
             property.SetMethod?.DeclaredAccessibility == Accessibility.Public);
 
-    private static IEnumerable<IParameterSymbol> RequiredConstructorParameters(INamedTypeSymbol type)
+    private static IMethodSymbol? GetJsonConstructor(INamedTypeSymbol type)
     {
-        var constructor = type.InstanceConstructors.FirstOrDefault(candidate => HasAttribute(candidate, "JsonConstructorAttribute"));
+        var constructor = type.InstanceConstructors.FirstOrDefault(candidate =>
+            HasAttribute(candidate, JsonSerialization + "JsonConstructorAttribute"));
         if (constructor is null && !type.IsValueType)
         {
             var publicConstructors = type.InstanceConstructors.Where(candidate =>
@@ -266,7 +271,7 @@ internal sealed class HubPayloadSchemaEmitter
                 : publicConstructors.FirstOrDefault(candidate => candidate.Parameters.IsEmpty);
         }
 
-        return constructor?.Parameters.Where(parameter => !parameter.IsOptional) ?? [];
+        return constructor;
     }
 
     private static (string Type, string? Format)? Scalar(ITypeSymbol type)
@@ -309,14 +314,14 @@ internal sealed class HubPayloadSchemaEmitter
 
     private static bool IsIgnored(IPropertySymbol property)
     {
-        var attribute = GetAttribute(property, "JsonIgnoreAttribute");
+        var attribute = GetAttribute(property, JsonSerialization + "JsonIgnoreAttribute");
         return attribute is not null &&
             Equals(attribute.NamedArguments.FirstOrDefault().Value.Value ?? JsonIgnoreAlways, JsonIgnoreAlways);
     }
 
     private static string PropertyName(IPropertySymbol property)
     {
-        return GetAttribute(property, "JsonPropertyNameAttribute")?.ConstructorArguments[0].Value is string name
+        return GetAttribute(property, JsonSerialization + "JsonPropertyNameAttribute")?.ConstructorArguments[0].Value is string name
             ? Literal(name)
             : $"naming?.ConvertName({Literal(property.Name)}) ?? {Literal(property.Name)}";
     }
@@ -324,7 +329,7 @@ internal sealed class HubPayloadSchemaEmitter
     private static bool HasAttribute(ISymbol symbol, string name) => GetAttribute(symbol, name) is not null;
 
     private static AttributeData? GetAttribute(ISymbol symbol, string name) => symbol.GetAttributes()
-        .FirstOrDefault(attribute => attribute.AttributeConstructor?.ContainingType.ToDisplayString() == JsonSerialization + name);
+        .FirstOrDefault(attribute => attribute.AttributeConstructor?.ContainingType.ToDisplayString() == name);
 
     private static string TypeValue(string type, bool nullable) => nullable
         ? $"new {JsonArrayType}({Literal(type)}, \"null\")"

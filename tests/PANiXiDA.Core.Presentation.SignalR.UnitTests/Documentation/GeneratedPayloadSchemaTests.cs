@@ -1,6 +1,8 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 using Asp.Versioning;
 
@@ -42,6 +44,44 @@ public sealed class GeneratedPayloadSchemaTests
         properties["is_ready"]!["type"]!.GetValue<string>().ShouldBe("boolean");
         schema["required"]!.AsArray().Select(item => item!.GetValue<string>())
             .ShouldBe(properties.Select(property => property.Key), ignoreOrder: true);
+    }
+
+    [Fact(DisplayName = "Closed generic DTOs preserve nested shapes and the selected JSON constructor's required members")]
+    public async Task GeneratesSchemasForConstructedTypesAndRequiredMembers()
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Services.AddSignalR(builder.Configuration);
+        await using var app = builder.Build();
+        app.UseSignalR(hubs => ConstructedSchemaHub.Map(hubs));
+
+        var schema = GenerateResultSchema(app, "constructed");
+
+        var payload = schema["properties"]!["value"]!["properties"]!["value"]!;
+        payload["properties"]!["name"]!["type"]!.GetValue<string>().ShouldBe("string");
+        payload["required"]!.AsArray().Select(item => item!.GetValue<string>())
+            .ShouldBe(["sequence", "token"], ignoreOrder: true);
+    }
+
+    [Fact(DisplayName = "A custom JSON type resolver requires explicit documentation metadata")]
+    public async Task RejectsGeneratedSchemaForModifiedResolver()
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        var resolver = new DefaultJsonTypeInfoResolver();
+        resolver.Modifiers.Add(typeInfo =>
+        {
+            if (typeInfo.Type == typeof(GeneratedSchemaPayload))
+            {
+                typeInfo.Properties.Single(property => property.Name == "name").Name = "displayName";
+            }
+        });
+        builder.Services.AddSignalR(builder.Configuration).AddJsonProtocol(options =>
+            options.PayloadSerializerOptions.TypeInfoResolver = resolver);
+        await using var app = builder.Build();
+        app.UseSignalR(hubs => GeneratedSchemaHub.Map(hubs));
+
+        var error = Should.Throw<InvalidOperationException>(() => GenerateResultSchema(app, "generated"));
+
+        error.Message.ShouldContain(nameof(GeneratedSchemaPayload));
     }
 
     [Theory(DisplayName = "A JSON context supplies the contract for a configured converter on a nested DTO member")]
@@ -124,6 +164,19 @@ public sealed class GeneratedSchemaHub : Hub, IDocumentedHubEndpoint
     public GeneratedSchemaPayload Echo(GeneratedSchemaPayload payload) => payload;
 }
 
+public sealed class ConstructedSchemaHub : Hub, IDocumentedHubEndpoint
+{
+    public static string Name => "constructed";
+
+    public static string Summary => "Constructed";
+
+    public static ApiVersion ApiVersion => new(1, 0);
+
+    public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<ConstructedSchemaHub>("/constructed");
+
+    public SchemaBox<SchemaBox<InitializedSchemaPayload>> Echo(SchemaBox<SchemaBox<InitializedSchemaPayload>> payload) => payload;
+}
+
 public sealed class ConverterSchemaHub : Hub, IDocumentedHubEndpoint
 {
     public static string Name => "converter";
@@ -147,6 +200,25 @@ public sealed record GeneratedSchemaPayload(Guid? GameId, DateTimeOffset? Queued
 
     [JsonRequired]
     public bool IsReady { get; init; }
+}
+
+public sealed record SchemaBox<T>(T Value);
+
+public sealed class InitializedSchemaPayload
+{
+    [SetsRequiredMembers]
+    public InitializedSchemaPayload(int sequence)
+    {
+        Sequence = sequence;
+        Name = "initialized";
+    }
+
+    public int Sequence { get; }
+
+    public required string Name { get; init; }
+
+    [JsonRequired]
+    public string? Token { get; init; }
 }
 
 public sealed record GeneratedSchemaNested(int Count)

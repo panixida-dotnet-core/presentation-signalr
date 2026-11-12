@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 using PANiXiDA.Core.Presentation.SignalR.Documentation;
 
@@ -68,4 +69,29 @@ public sealed class HubPayloadSchemaTests
 
         schema.Create(options).ShouldBeNull();
     }
+
+    [Theory(DisplayName = "Generated schemas require unmodified built-in JSON resolvers")]
+    [InlineData("default", true)]
+    [InlineData("modified", false)]
+    [InlineData("derived", false)]
+    public void ChecksConfiguredResolvers(string resolverKind, bool canGenerate)
+    {
+        var resolver = resolverKind == "derived" ? new DerivedResolver() : new DefaultJsonTypeInfoResolver();
+        if (resolverKind == "modified")
+        {
+            resolver.Modifiers.Add(_ => { });
+        }
+
+        var options = new JsonSerializerOptions
+        {
+            TypeInfoResolver = resolver,
+            RespectNullableAnnotations = true,
+            RespectRequiredConstructorParameters = true
+        };
+        var schema = new HubPayloadSchema(_ => new JsonObject(), typeof(int));
+
+        (schema.Create(options) is not null).ShouldBe(canGenerate);
+    }
+
+    private sealed class DerivedResolver : DefaultJsonTypeInfoResolver;
 }

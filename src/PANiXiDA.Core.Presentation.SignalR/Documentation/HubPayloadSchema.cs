@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace PANiXiDA.Core.Presentation.SignalR.Documentation;
 
@@ -43,8 +44,13 @@ public sealed class HubPayloadSchema
             RespectRequiredConstructorParameters: true
         };
 
-        return standardContract && !options.Converters.Any(converter => _types.Any(converter.CanConvert))
+        return standardContract && options.TypeInfoResolverChain.All(IsStandardResolver) &&
+            !options.Converters.Any(converter => _types.Any(converter.CanConvert))
             ? _create(options.PropertyNamingPolicy)
             : null;
     }
+
+    private static bool IsStandardResolver(IJsonTypeInfoResolver resolver) =>
+        resolver is DefaultJsonTypeInfoResolver defaultResolver &&
+        defaultResolver.GetType() == typeof(DefaultJsonTypeInfoResolver) && defaultResolver.Modifiers.Count == 0;
 }
