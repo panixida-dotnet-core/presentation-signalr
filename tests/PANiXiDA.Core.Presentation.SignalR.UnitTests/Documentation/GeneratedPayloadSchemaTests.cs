@@ -203,7 +203,11 @@ public sealed class GeneratedSchemaHub : Hub, IDocumentedHubEndpoint
 
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<GeneratedSchemaHub>("/generated");
 
-    public GeneratedSchemaPayload Echo(GeneratedSchemaPayload payload) => payload;
+    public GeneratedSchemaPayload Echo(GeneratedSchemaPayload payload)
+    {
+        Context.ConnectionAborted.ThrowIfCancellationRequested();
+        return payload;
+    }
 }
 
 public sealed class ConstructedSchemaHub : Hub, IDocumentedHubEndpoint
@@ -216,7 +220,11 @@ public sealed class ConstructedSchemaHub : Hub, IDocumentedHubEndpoint
 
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<ConstructedSchemaHub>("/constructed");
 
-    public SchemaBox<SchemaBox<InitializedSchemaPayload>> Echo(SchemaBox<SchemaBox<InitializedSchemaPayload>> payload) => payload;
+    public SchemaBox<SchemaBox<InitializedSchemaPayload>> Echo(SchemaBox<SchemaBox<InitializedSchemaPayload>> payload)
+    {
+        Context.ConnectionAborted.ThrowIfCancellationRequested();
+        return payload;
+    }
 }
 
 public sealed class ConverterSchemaHub : Hub, IDocumentedHubEndpoint
