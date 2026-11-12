@@ -228,15 +228,11 @@ internal sealed class HubPayloadSchemaEmitter(bool isOutput)
     private bool IncludesProperty(IPropertySymbol property, IParameterSymbol? parameter, int ignoreCondition) =>
         isOutput
             ? property.GetMethod?.DeclaredAccessibility == Accessibility.Public && ignoreCondition != JsonIgnoreWhenWriting
-            : ignoreCondition != JsonIgnoreWhenReading || parameter is not null;
+            : parameter is not null || (property.SetMethod?.DeclaredAccessibility == Accessibility.Public &&
+                ignoreCondition != JsonIgnoreWhenReading);
 
     private string? BuildProperty(IPropertySymbol property, IParameterSymbol? parameter)
     {
-        if (HasCustomContract(property))
-        {
-            return null;
-        }
-
         if (!isOutput && parameter is not null)
         {
             return Build(parameter.Type.WithNullableAnnotation(GetParameterNullability(parameter)), enforceReferenceNullability: true);
@@ -307,10 +303,17 @@ internal sealed class HubPayloadSchemaEmitter(bool isOutput)
             }
 
             seen.Add(property.Name, name);
-            if (GetIgnoreCondition(property) != JsonIgnoreAlways)
+            if (GetIgnoreCondition(property) == JsonIgnoreAlways)
             {
-                properties.Add(property);
+                continue;
             }
+
+            if (HasCustomContract(property))
+            {
+                return false;
+            }
+
+            properties.Add(property);
         }
 
         return true;

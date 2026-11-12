@@ -76,6 +76,7 @@ public sealed class GeneratedPayloadSchemaTests
         var inputProperties = inputPayload["properties"]!;
         inputProperties["readOnly"].ShouldNotBeNull();
         inputProperties["presentation"].ShouldBeNull();
+        inputProperties["serverValue"].ShouldBeNull();
         inputProperties["writeOnly"].ShouldNotBeNull();
         inputProperties["normalized"]!["type"]!.AsArray().Select(item => item!.GetValue<string>()).ShouldBe(["string", "null"]);
         inputProperties["hint"]!["type"]!.AsArray().Select(item => item!.GetValue<string>()).ShouldBe(["string", "null"]);
@@ -87,6 +88,7 @@ public sealed class GeneratedPayloadSchemaTests
         var outputProperties = outputPayload["properties"]!;
         outputProperties["readOnly"].ShouldNotBeNull();
         outputProperties["presentation"].ShouldNotBeNull();
+        outputProperties["serverValue"]!["type"]!.GetValue<string>().ShouldBe("integer");
         outputProperties["writeOnly"].ShouldBeNull();
         outputProperties["setOnly"].ShouldBeNull();
         outputProperties["normalized"]!["type"]!.GetValue<string>().ShouldBe("string");
@@ -251,6 +253,8 @@ public sealed class InitializedSchemaPayload(int sequence, int count, string? no
     string? normalized, [AllowNull] string hint, [DisallowNull] string? key)
 {
     public int Sequence { get; } = sequence;
+
+    public int ServerValue => Sequence;
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public int Count { get; } = count;
