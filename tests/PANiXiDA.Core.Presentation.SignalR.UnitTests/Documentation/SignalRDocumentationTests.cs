@@ -35,7 +35,6 @@ public sealed class SignalRDocumentationTests
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSignalR(builder.Configuration);
         builder.Services.AddAuthorization();
-        builder.Services.AddApiDocumentationSchemas(DocumentationJsonContext.Default);
         builder.Services.AddSingleton<DocumentationDependency>();
         await using var app = builder.Build();
         app.MapGet("/plain-before", static () => "ready");

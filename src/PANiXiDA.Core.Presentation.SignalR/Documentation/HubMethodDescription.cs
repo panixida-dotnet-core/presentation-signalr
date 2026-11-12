@@ -62,6 +62,9 @@ public sealed class HubMethodDescription
     /// <summary>Gets the optional return or stream item type.</summary>
     public Type? ResultType { get; }
 
+    /// <summary>Gets or sets the automatically generated result or stream item schema.</summary>
+    public HubPayloadSchema? ResultSchema { get; init; }
+
     /// <summary>Gets whether this is a client callback.</summary>
     public bool IsClientMethod { get; }
 

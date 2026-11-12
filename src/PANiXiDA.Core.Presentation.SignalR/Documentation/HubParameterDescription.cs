@@ -27,6 +27,9 @@ public sealed class HubParameterDescription
     /// <summary>Gets the payload type.</summary>
     public Type Type { get; }
 
+    /// <summary>Gets or sets the automatically generated payload schema.</summary>
+    public HubPayloadSchema? Schema { get; init; }
+
     /// <summary>Gets whether the parameter is a stream.</summary>
     public bool IsStream { get; }
 

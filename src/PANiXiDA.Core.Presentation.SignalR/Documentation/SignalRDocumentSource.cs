@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -21,6 +22,8 @@ internal sealed class SignalRDocumentSource(
     private const string InvocationId = "invocationId";
     private const string Target = "target";
     private const string JsonString = "string";
+
+    private readonly JsonSerializerContext[] _contexts = [.. services.GetServices<JsonSerializerContext>()];
 
     public IReadOnlyCollection<ApiDocumentDescriptor> GetDocuments()
     {
@@ -124,7 +127,7 @@ internal sealed class SignalRDocumentSource(
         {
             var streamId = id + ".upload." + parameter.Name;
             return new AsyncApiOperation(streamId, context.Path, AsyncApiAction.Receive,
-                new AsyncApiMessage(streamId, CreateReplySchema(parameter.Type, true))
+                new AsyncApiMessage(streamId, CreateReplySchema(parameter.Type, parameter.Schema, true))
                 {
                     Title = documentation.Name + " / " + parameter.Name + " stream"
                 }, context.WireProtocol)
@@ -172,7 +175,7 @@ internal sealed class SignalRDocumentSource(
             Name = documentation.Name,
             Bindings = new JsonObject { ["x-signalr"] = binding },
             Reply = !method.IsClientMethod || method.ResultType is not null
-                ? new AsyncApiMessage(id + ".result", CreateReplySchema(method.ResultType, method.IsStream))
+                ? new AsyncApiMessage(id + ".result", CreateReplySchema(method.ResultType, method.ResultSchema, method.IsStream))
                 {
                     Title = documentation.Name + replySuffix
                 } : null
@@ -182,7 +185,7 @@ internal sealed class SignalRDocumentSource(
     private JsonObject InvocationSchema(HubMethodDescription method, HubParameterDescription[] parameters, int streams)
     {
         var argumentSchemas = new JsonArray([.. parameters.Where(parameter => !parameter.IsStream)
-            .Select((parameter, index) => schemas.GetSchema(parameter.Type, "#/properties/arguments/prefixItems/" + index))]);
+            .Select((parameter, index) => GetSchema(parameter.Type, parameter.Schema, "#/properties/arguments/prefixItems/" + index))]);
         var arguments = new JsonObject
         {
             ["type"] = "array",
@@ -225,14 +228,28 @@ internal sealed class SignalRDocumentSource(
     private static Type GetServiceType(Type type) => type.IsConstructedGenericType &&
         type.GetGenericTypeDefinition() == typeof(IEnumerable<>) ? type.GenericTypeArguments[0] : type;
 
-    private JsonObject CreateReplySchema(Type? resultType, bool stream)
+    private JsonNode GetSchema(Type type, HubPayloadSchema? generated, string referencePrefix)
+    {
+        if (generated is not null && !_contexts.Any(context => context.GetTypeInfo(type) is not null))
+        {
+            var options = services.GetRequiredService<IOptions<JsonHubProtocolOptions>>().Value.PayloadSerializerOptions;
+            if (generated.Create(options) is { } schema)
+            {
+                return schema;
+            }
+        }
+
+        return schemas.GetSchema(type, referencePrefix);
+    }
+
+    private JsonObject CreateReplySchema(Type? resultType, HubPayloadSchema? generated, bool stream)
     {
         var alternatives = new JsonArray();
         if (resultType is not null)
         {
             var property = stream ? "item" : "result";
             alternatives.Add((JsonNode)ProtocolMessage(stream ? 2 : 3, property,
-                schemas.GetSchema(resultType, "#/oneOf/0/properties/" + property)));
+                GetSchema(resultType, generated, "#/oneOf/0/properties/" + property)));
         }
 
         if (resultType is null && !stream)

@@ -118,8 +118,13 @@ internal static class HubDocumentationEmitter
             .Append(", isStream: ").Append(Literal(resultStream))
             .Append(", summary: ").Append(Literal(Summary(method)))
             .Append(", requiresAuthorization: ").Append(Literal(HasMetadata(method, "Microsoft.AspNetCore.Authorization.IAuthorizeData"))).AppendLine(") {")
-            .Append("                MemberName = ").Append(Literal(method.Name)).AppendLine(",")
-            .Append("                Documentation = new global::PANiXiDA.Core.ApiDocumentation.ApiOperationMetadata(")
+            .Append("                MemberName = ").Append(Literal(method.Name)).AppendLine(",");
+        if (returnType is not null && HubPayloadSchemaEmitter.Emit(returnType) is { } schema)
+        {
+            result.Append("                ResultSchema = ").Append(schema).AppendLine(",");
+        }
+
+        result.Append("                Documentation = new global::PANiXiDA.Core.ApiDocumentation.ApiOperationMetadata(")
             .Append(Literal(AttributeValue(method, "Microsoft.AspNetCore.Routing.EndpointNameAttribute") ?? method.Name)).Append(", ")
             .Append(Literal(AttributeValue(method, "Microsoft.AspNetCore.Http.EndpointSummaryAttribute") ?? Summary(method))).AppendLine(") },");
     }
@@ -130,7 +135,13 @@ internal static class HubDocumentationEmitter
         result.Append("                new ").Append(Metadata).Append("HubParameterDescription(")
             .Append(Literal(parameter.Name)).Append(", typeof(").Append(TypeName(payload))
             .Append("), ").Append(Literal(stream))
-            .Append(", allowImplicitServices: ").Append(Literal(parameter.GetAttributes().Length == 0)).AppendLine("),");
+            .Append(", allowImplicitServices: ").Append(Literal(parameter.GetAttributes().Length == 0)).Append(')');
+        if (HubPayloadSchemaEmitter.Emit(payload) is { } schema)
+        {
+            result.Append(" { Schema = ").Append(schema).Append(" }");
+        }
+
+        result.AppendLine(",");
     }
 
     private static bool ShouldSerialize(IParameterSymbol parameter, bool resultStream, bool client)

@@ -151,7 +151,7 @@ public sealed class HubRegistrationGeneratorTests
             app.UseSignalR(external, local, local);
 
             HubEndpoints(app).Select(endpoint => endpoint.RoutePattern.RawText)
-            .ShouldBe(["/external", "/v1/state", "/v2/state", "/metadata", "/secondary", "/hubs/other", "/hubs/events"]);
+                .ShouldBe(["/external", "/converter", "/v1/state", "/v2/state", "/generated", "/metadata", "/secondary", "/hubs/other", "/hubs/events"]);
         }
         finally
         {
@@ -490,6 +490,148 @@ public sealed class HubRegistrationGeneratorTests
     {
         Compile(DocumentedSource("""[Microsoft.AspNetCore.Routing.EndpointName(" ")] public void Read() { }"""),
             "PANSIGNALRSG004");
+    }
+
+    [Fact(DisplayName = "The generator emits schemas for ordinary DTOs and their serialized members")]
+    public void EmitsSchemasForOrdinaryPayloads()
+    {
+        const string declarations = """
+            using System;
+            using System.Collections.Generic;
+            using System.Text.Json.Serialization;
+
+            public sealed record Payload(Guid? Id, DateTimeOffset Date, bool Enabled, byte[] Data, string[] Tags,
+                IReadOnlyList<int?> Values, Dictionary<string, Member> Members, PayloadKind Kind, Member Field,
+                MemberWithConstructors Other, NamedMember? Named);
+
+            public enum PayloadKind { A, B }
+
+            public struct Member
+            {
+                public double Count { get; set; }
+            }
+
+            public class MemberWithConstructors
+            {
+                public MemberWithConstructors() { }
+                public MemberWithConstructors(string? value) { Value = value; }
+                public string? Value { get; }
+            }
+
+            public class BaseMember
+            {
+                public virtual string Visible => "";
+                public virtual string Hidden => "";
+            }
+
+            public sealed class NamedMember : BaseMember
+            {
+                [JsonConstructor]
+                public NamedMember(int count, string? note = null) { Count = count; Note = note; }
+
+                public static string Static => "";
+                public string this[int index] => "";
+                private string Private => "";
+                public string SetOnly { set { } }
+
+                public required string Name { get; init; }
+                [JsonRequired]
+                public bool Selected { get; init; }
+                [JsonPropertyName("member_count")]
+                public int Count { get; }
+                public string? Note { get; }
+
+                [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+                public override string Visible => "";
+                [JsonIgnore]
+                public override string Hidden => "";
+            }
+            """;
+        var (result, _) = Compile(declarations + DocumentedSource("public Payload Echo(Payload input) => input;"));
+
+        var source = result.GeneratedTrees.Single().GetText(TestContext.Current.CancellationToken).ToString();
+        source.ShouldContain("ResultSchema = new");
+        source.ShouldContain("Schema = new");
+        source.ShouldContain("\"member_count\"");
+        source.ShouldContain("\"additionalProperties\"");
+        source.ShouldContain("\"uuid\"");
+        source.ShouldNotContain("\"Hidden\"");
+    }
+
+    [Fact(DisplayName = "The generator defers custom and unsupported JSON contracts to explicit contexts")]
+    public void OmitsSchemasForContractsThatNeedExplicitMetadata()
+    {
+        const string declarations = """
+            using System;
+            using System.Collections;
+            using System.Collections.Generic;
+            using System.Text.Json;
+            using System.Text.Json.Serialization;
+
+            [JsonConverter(typeof(JsonStringEnumConverter<CustomKind>))]
+            public enum CustomKind { A }
+
+            public interface InterfacePayload { string Value { get; } }
+            public abstract class AbstractPayload;
+            public sealed class RecursivePayload { public RecursivePayload? Next { get; init; } }
+            public sealed class Sequence : IEnumerable<string>
+            {
+                public IEnumerator<string> GetEnumerator() => throw new NotImplementedException();
+                IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+            }
+            public sealed class IncludedField { [JsonInclude] public int Value; }
+            public sealed class IncludedProperty { [JsonInclude] private int Value { get; set; } }
+            public sealed class ExtensionPayload { [JsonExtensionData] public Dictionary<string, JsonElement>? Values { get; init; } }
+            public sealed class UntypedMember { public object? Value { get; init; } }
+            public class BasePayload { public string? Value { get; init; } }
+            public sealed class ShadowedProperty : BasePayload
+            {
+                [JsonPropertyName("other")]
+                public new string? Value { get; init; }
+            }
+            [JsonPolymorphic]
+            public class PolymorphicBase;
+            public sealed class PolymorphicChild : PolymorphicBase;
+            """;
+        var source = declarations + DocumentedSource("""
+            public CustomKind? Custom() => null;
+            public InterfacePayload Interface() => null!;
+            public AbstractPayload Abstract() => null!;
+            public RecursivePayload Recursive() => null!;
+            public Sequence Enumerable() => null!;
+            public object Untyped() => null!;
+            public System.Threading.CancellationToken Framework() => default;
+            public int[,] Matrix() => null!;
+            public object[] UntypedItems() => [];
+            public Dictionary<int, string> NonStringKeys() => [];
+            public Dictionary<string, object> UntypedValues() => [];
+            public IncludedField Field() => new();
+            public IncludedProperty Property() => new();
+            public ExtensionPayload Extension() => new();
+            public UntypedMember Unknown() => new();
+            public ShadowedProperty Shadowed() => new();
+            public PolymorphicChild Polymorphic() => new();
+            """);
+
+        var (result, _) = Compile(source);
+
+        result.GeneratedTrees.Single().GetText(TestContext.Current.CancellationToken).ToString().ShouldNotContain("ResultSchema =");
+    }
+
+    [Fact(DisplayName = "An unbound JSON attribute does not interrupt hub generation")]
+    public void KeepsGeneratingWhenJsonAttributeDoesNotBind()
+    {
+        const string declaration = """
+            public sealed class Payload
+            {
+                [System.Text.Json.Serialization.JsonPropertyName]
+                public string Value { get; init; } = "";
+            }
+            """;
+
+        var (result, _) = Compile(declaration + DocumentedSource("public Payload Read() => new();"), allowCompilationErrors: true);
+
+        result.GeneratedTrees.Single().GetText(TestContext.Current.CancellationToken).ToString().ShouldContain("ConvertName(\"Value\")");
     }
 
     private static string DocumentedSource(string methods, string baseType = "Microsoft.AspNetCore.SignalR.Hub") => $$"""

@@ -394,17 +394,19 @@ The generator discovers inherited methods, async results, typed callbacks and bo
 
 Custom awaitables supported by the SignalR dispatcher, such as the return value of `ConfigureAwait`, are documented using their awaited result. Use `Task` or `ValueTask` for Native AOT hub methods.
 
-Register generated JSON metadata for arguments, results and stream items, then connect the independent presenter:
+Connect the independent presenter. The hub generator supplies schemas for ordinary payloads:
 
 ```csharp
 builder.Services.AddSignalR(builder.Configuration);
-builder.Services.AddApiDocumentation(builder.Configuration, ApplicationJsonContext.Default);
+builder.Services.AddApiDocumentation(builder.Configuration);
 var app = builder.Build();
 app.UseSignalR(typeof(MatchmakingHub).Assembly);
 app.UseApiDocumentation();
 ```
 
-The host uses the SignalR and `PANiXiDA.Core.Presentation.Scalar.DependencyInjection` namespaces. `ApplicationJsonContext` is an application-owned `[JsonSerializable]` context; configure SignalR JSON resolvers and MessagePack shapes for the same payloads as usual. Missing schema metadata fails without reflection fallback.
+The host uses the SignalR and `PANiXiDA.Core.Presentation.Scalar.DependencyInjection` namespaces. Generated schemas cover arguments, results, stream items and typed callbacks with scalar values, nullable types, arrays, common generic collections, string-keyed dictionaries and DTOs with public properties. Property names follow the SignalR JSON naming policy.
+
+Pass an application-owned source-generated context to `AddApiDocumentation(configuration, ApplicationJsonContext.Default)` for custom JSON contracts, such as converters, polymorphic or recursive DTOs. Registered metadata takes precedence. A payload without either kind of schema fails explicitly. Configure the runtime SignalR JSON resolvers and MessagePack shapes separately.
 
 `/asyncapi/matchmaking-signalr-v1.json` contains actual paths, arguments, replies, callbacks and streams. `x-signalr` bindings report targets, protocols, mapped transports and authorization, including the fallback policy configured in `AuthorizationOptions`. JSON envelopes contain generated payload schemas. Completion errors remain strings. MessagePack uses its binary protocol encoding. Untyped `Clients.SendAsync` calls require a custom document source because their runtime target strings cannot be inferred reliably.
 
