@@ -32,12 +32,18 @@ public sealed class GeneratedPayloadSchemaTests
 
         var properties = schema["properties"]!.AsObject();
         properties.Select(property => property.Key).ShouldBe(
-            ["game_id", "queued_at", "name", "scores", "metadata", "blob", "link", "status", "is_ready"], ignoreOrder: true);
+            ["game_id", "queued_at", "name", "scores", "metadata", "blob", "link", "status", "labels", "aliases", "is_ready"], ignoreOrder: true);
         properties["game_id"]!["type"]!.AsArray().Select(item => item!.GetValue<string>()).ShouldBe(["string", "null"]);
         properties["game_id"]!["format"]!.GetValue<string>().ShouldBe("uuid");
         properties["queued_at"]!["format"]!.GetValue<string>().ShouldBe("date-time");
         properties["scores"]!["items"]!["type"]!.AsArray().Select(item => item!.GetValue<string>()).ShouldBe(["integer", "null"]);
         properties["metadata"]!["additionalProperties"]!["properties"]!["ratio"]!["type"]!.GetValue<string>().ShouldBe("number");
+        properties["metadata"]!["additionalProperties"]!["type"]!.AsArray().Select(item => item!.GetValue<string>())
+            .ShouldBe(["object", "null"]);
+        properties["labels"]!["items"]!["type"]!.AsArray().Select(item => item!.GetValue<string>())
+            .ShouldBe(["string", "null"]);
+        properties["aliases"]!["items"]!["type"]!.AsArray().Select(item => item!.GetValue<string>())
+            .ShouldBe(["string", "null"]);
         properties["blob"]!["format"]!.GetValue<string>().ShouldBe("byte");
         properties["link"]!["format"]!.GetValue<string>().ShouldBe("uri");
         properties["status"]!["type"]!.GetValue<string>().ShouldBe("integer");
@@ -54,11 +60,23 @@ public sealed class GeneratedPayloadSchemaTests
         await using var app = builder.Build();
         app.UseSignalR(hubs => ConstructedSchemaHub.Map(hubs));
 
-        var schema = GenerateResultSchema(app, "constructed");
+        var document = GenerateDocument(app, "constructed");
+        var request = document["components"]!["messages"]!.AsObject().Single(message =>
+            !message.Value!["name"]!.GetValue<string>().EndsWith(".result", StringComparison.Ordinal)).Value!;
+        var input = request["payload"]!["schema"]!["properties"]!["arguments"]!["prefixItems"]![0]!;
+        var output = GetResultSchema(document);
 
-        var payload = schema["properties"]!["value"]!["properties"]!["value"]!;
-        payload["properties"]!["name"]!["type"]!.GetValue<string>().ShouldBe("string");
-        payload["required"]!.AsArray().Select(item => item!.GetValue<string>())
+        var inputPayload = input["properties"]!["value"]!["properties"]!["value"]!;
+        inputPayload["properties"]!["name"]!["type"]!.GetValue<string>().ShouldBe("string");
+        inputPayload["properties"]!["readOnly"].ShouldBeNull();
+        inputPayload["properties"]!["writeOnly"].ShouldNotBeNull();
+        inputPayload["required"]!.AsArray().Select(item => item!.GetValue<string>())
+            .ShouldBe(["sequence", "count", "note", "token"], ignoreOrder: true);
+
+        var outputPayload = output["properties"]!["value"]!["properties"]!["value"]!;
+        outputPayload["properties"]!["readOnly"].ShouldNotBeNull();
+        outputPayload["properties"]!["writeOnly"].ShouldBeNull();
+        outputPayload["required"]!.AsArray().Select(item => item!.GetValue<string>())
             .ShouldBe(["sequence", "token"], ignoreOrder: true);
     }
 
@@ -140,10 +158,17 @@ public sealed class GeneratedPayloadSchemaTests
         }
     }
 
-    private static JsonNode GenerateResultSchema(WebApplication app, string module)
+    private static JsonNode GenerateResultSchema(WebApplication app, string module) =>
+        GetResultSchema(GenerateDocument(app, module));
+
+    private static JsonObject GenerateDocument(WebApplication app, string module)
     {
         var source = app.Services.GetServices<IApiDocumentSource>().OfType<IAsyncApiDocumentSource>().Single();
-        var document = source.Generate(module + "-signalr-v1", TestContext.Current.CancellationToken);
+        return source.Generate(module + "-signalr-v1", TestContext.Current.CancellationToken);
+    }
+
+    private static JsonNode GetResultSchema(JsonObject document)
+    {
         var reply = document["components"]!["messages"]!.AsObject().Single(message =>
             message.Value!["name"]!.GetValue<string>().EndsWith(".result", StringComparison.Ordinal)).Value!;
         return reply["payload"]!["schema"]!["oneOf"]![0]!["properties"]!["result"]!;
@@ -193,7 +218,8 @@ public sealed class ConverterSchemaHub : Hub, IDocumentedHubEndpoint
 
 public sealed record GeneratedSchemaPayload(Guid? GameId, DateTimeOffset? QueuedAt,
     [property: JsonPropertyName("name")] string DisplayName, IReadOnlyList<int?> Scores,
-    Dictionary<string, GeneratedSchemaNested> Metadata, byte[] Blob, Uri? Link, GeneratedSchemaState Status)
+    Dictionary<string, GeneratedSchemaNested> Metadata, byte[] Blob, Uri? Link, GeneratedSchemaState Status,
+    string[] Labels, List<string> Aliases)
 {
     [JsonIgnore]
     public string Ignored => DisplayName;
@@ -204,18 +230,24 @@ public sealed record GeneratedSchemaPayload(Guid? GameId, DateTimeOffset? Queued
 
 public sealed record SchemaBox<T>(T Value);
 
-public sealed class InitializedSchemaPayload
+[method: SetsRequiredMembers]
+public sealed class InitializedSchemaPayload(int sequence, int count, string? note)
 {
-    [SetsRequiredMembers]
-    public InitializedSchemaPayload(int sequence)
-    {
-        Sequence = sequence;
-        Name = "initialized";
-    }
+    public int Sequence { get; } = sequence;
 
-    public int Sequence { get; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int Count { get; } = count;
 
-    public required string Name { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Note { get; } = note;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenReading)]
+    public string? ReadOnly { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
+    public string? WriteOnly { get; init; }
+
+    public required string Name { get; init; } = "initialized";
 
     [JsonRequired]
     public string? Token { get; init; }

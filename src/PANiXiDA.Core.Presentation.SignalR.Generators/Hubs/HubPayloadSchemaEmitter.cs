@@ -3,7 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 
 namespace PANiXiDA.Core.Presentation.SignalR.Generators.Hubs;
 
-internal sealed class HubPayloadSchemaEmitter
+internal sealed class HubPayloadSchemaEmitter(bool isOutput)
 {
     private const string JsonSerialization = "System.Text.Json.Serialization.";
     private const string JsonObjectType = "global::System.Text.Json.Nodes.JsonObject";
@@ -11,7 +11,12 @@ internal sealed class HubPayloadSchemaEmitter
     private const string JsonString = "string";
     private const string JsonInteger = "integer";
     private const string SchemaType = "global::PANiXiDA.Core.Presentation.SignalR.Documentation.HubPayloadSchema";
+    private const int JsonIgnoreNever = 0;
     private const int JsonIgnoreAlways = 1;
+    private const int JsonIgnoreWhenWritingDefault = 2;
+    private const int JsonIgnoreWhenWritingNull = 3;
+    private const int JsonIgnoreWhenWriting = 4;
+    private const int JsonIgnoreWhenReading = 5;
     private const int MaxObjectDepth = 64;
 
     private static readonly HashSet<string> Dictionaries = new(StringComparer.Ordinal)
@@ -80,9 +85,9 @@ internal sealed class HubPayloadSchemaEmitter
     private readonly HashSet<ITypeSymbol> _types = new(SymbolEqualityComparer.Default);
     private readonly HashSet<INamedTypeSymbol> _objects = new(SymbolEqualityComparer.Default);
 
-    internal static string? Emit(ITypeSymbol type)
+    internal static string? Emit(ITypeSymbol type, bool isOutput)
     {
-        var emitter = new HubPayloadSchemaEmitter();
+        var emitter = new HubPayloadSchemaEmitter(isOutput);
         var schema = emitter.Build(type);
         if (schema is null)
         {
@@ -96,10 +101,10 @@ internal sealed class HubPayloadSchemaEmitter
         return $"new {SchemaType}(static naming => {schema}, {string.Join(", ", types)})";
     }
 
-    private string? Build(ITypeSymbol type)
+    private string? Build(ITypeSymbol type, bool isCollectionElement = false)
     {
         _types.Add(type);
-        var nullable = type.IsReferenceType && type.NullableAnnotation != NullableAnnotation.NotAnnotated;
+        var nullable = type.IsReferenceType && (isCollectionElement || type.NullableAnnotation != NullableAnnotation.NotAnnotated);
         if (type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } optional)
         {
             type = optional.TypeArguments[0];
@@ -156,7 +161,7 @@ internal sealed class HubPayloadSchemaEmitter
 
     private string? Array(ITypeSymbol itemType, bool nullable)
     {
-        return Build(itemType) is { } item
+        return Build(itemType, isCollectionElement: true) is { } item
             ? Object(("type", TypeValue("array", nullable)), ("items", item))
             : null;
     }
@@ -164,7 +169,7 @@ internal sealed class HubPayloadSchemaEmitter
     private string? Dictionary(INamedTypeSymbol type, bool nullable)
     {
         var key = type.TypeArguments[0];
-        if (key.SpecialType != SpecialType.System_String || Build(type.TypeArguments[1]) is not { } value)
+        if (key.SpecialType != SpecialType.System_String || Build(type.TypeArguments[1], isCollectionElement: true) is not { } value)
         {
             return null;
         }
@@ -189,6 +194,12 @@ internal sealed class HubPayloadSchemaEmitter
             HasAttribute(constructor, "System.Diagnostics.CodeAnalysis.SetsRequiredMembersAttribute");
         foreach (var property in members)
         {
+            var ignoreCondition = GetIgnoreCondition(property);
+            if (ignoreCondition == (isOutput ? JsonIgnoreWhenWriting : JsonIgnoreWhenReading))
+            {
+                continue;
+            }
+
             if (HasCustomContract(property) || Build(property.Type) is not { } schema)
             {
                 return null;
@@ -196,9 +207,11 @@ internal sealed class HubPayloadSchemaEmitter
 
             var name = PropertyName(property);
             properties.Add($"{{ {name}, {schema} }}");
-            if ((property.IsRequired && !setsRequiredMembers) || HasAttribute(property, JsonSerialization + "JsonRequiredAttribute") ||
+            var conditionallyOmitted = isOutput && ignoreCondition is JsonIgnoreWhenWritingDefault or JsonIgnoreWhenWritingNull;
+            if (!conditionallyOmitted && ((property.IsRequired && !setsRequiredMembers) ||
+                HasAttribute(property, JsonSerialization + "JsonRequiredAttribute") ||
                 constructorParameters.Any(parameter => StringComparer.OrdinalIgnoreCase.Equals(parameter.Name, property.Name) &&
-                    SymbolEqualityComparer.Default.Equals(parameter.Type, property.Type)))
+                    SymbolEqualityComparer.Default.Equals(parameter.Type, property.Type))))
             {
                 required.Add(name);
             }
@@ -245,7 +258,7 @@ internal sealed class HubPayloadSchemaEmitter
             }
 
             seen.Add(property.Name, name);
-            if (!IsIgnored(property))
+            if (GetIgnoreCondition(property) != JsonIgnoreAlways)
             {
                 properties.Add(property);
             }
@@ -312,11 +325,12 @@ internal sealed class HubPayloadSchemaEmitter
         return false;
     }
 
-    private static bool IsIgnored(IPropertySymbol property)
+    private static int GetIgnoreCondition(IPropertySymbol property)
     {
         var attribute = GetAttribute(property, JsonSerialization + "JsonIgnoreAttribute");
-        return attribute is not null &&
-            Equals(attribute.NamedArguments.FirstOrDefault().Value.Value ?? JsonIgnoreAlways, JsonIgnoreAlways);
+        return attribute is null
+            ? JsonIgnoreNever
+            : (int?)attribute.NamedArguments.FirstOrDefault().Value.Value ?? JsonIgnoreAlways;
     }
 
     private static string PropertyName(IPropertySymbol property)

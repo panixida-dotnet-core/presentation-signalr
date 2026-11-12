@@ -110,7 +110,7 @@ internal static class HubDocumentationEmitter
             .Append(Literal(target)).Append(", new ").Append(Metadata).AppendLine("HubParameterDescription[] {");
         foreach (var parameter in parameters)
         {
-            AppendParameter(result, parameter);
+            AppendParameter(result, parameter, client);
         }
 
         result.Append("            }, ").Append(returnType is null ? "null" : "typeof(" + TypeName(returnType) + ")")
@@ -119,7 +119,7 @@ internal static class HubDocumentationEmitter
             .Append(", summary: ").Append(Literal(Summary(method)))
             .Append(", requiresAuthorization: ").Append(Literal(HasMetadata(method, "Microsoft.AspNetCore.Authorization.IAuthorizeData"))).AppendLine(") {")
             .Append("                MemberName = ").Append(Literal(method.Name)).AppendLine(",");
-        if (returnType is not null && HubPayloadSchemaEmitter.Emit(returnType) is { } schema)
+        if (returnType is not null && HubPayloadSchemaEmitter.Emit(returnType, isOutput: !client) is { } schema)
         {
             result.Append("                ResultSchema = ").Append(schema).AppendLine(",");
         }
@@ -129,14 +129,14 @@ internal static class HubDocumentationEmitter
             .Append(Literal(AttributeValue(method, "Microsoft.AspNetCore.Http.EndpointSummaryAttribute") ?? Summary(method))).AppendLine(") },");
     }
 
-    private static void AppendParameter(StringBuilder result, IParameterSymbol parameter)
+    private static void AppendParameter(StringBuilder result, IParameterSymbol parameter, bool client)
     {
         var payload = StreamItem(parameter.Type, out var stream);
         result.Append("                new ").Append(Metadata).Append("HubParameterDescription(")
             .Append(Literal(parameter.Name)).Append(", typeof(").Append(TypeName(payload))
             .Append("), ").Append(Literal(stream))
             .Append(", allowImplicitServices: ").Append(Literal(parameter.GetAttributes().Length == 0)).Append(')');
-        if (HubPayloadSchemaEmitter.Emit(payload) is { } schema)
+        if (HubPayloadSchemaEmitter.Emit(payload, isOutput: client) is { } schema)
         {
             result.Append(" { Schema = ").Append(schema).Append(" }");
         }
