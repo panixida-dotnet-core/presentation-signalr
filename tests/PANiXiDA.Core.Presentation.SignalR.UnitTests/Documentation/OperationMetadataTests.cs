@@ -38,14 +38,14 @@ public sealed class OperationMetadataTests
         read["bindings"]!["x-signalr"]!["target"]!.GetValue<string>().ShouldBe("wire-read");
         Message(document, read)["title"]!.GetValue<string>().ShouldBe("ContractRead request");
         Message(document, read, reply: true)["title"]!.GetValue<string>().ShouldBe("ContractRead response");
-        Operation(document, "/metadata", nameof(MetadataHub.OnlyContract))["summary"]!.GetValue<string>().ShouldBe("Contract summary");
-        Operation(document, "/metadata", nameof(MetadataHub.ClearSummary))["summary"]!.GetValue<string>().ShouldBeEmpty();
-        Operation(document, "/metadata", nameof(MetadataHub.OnlyAttributes))["title"]!.GetValue<string>().ShouldBe("AttributeOnly");
-        Operation(document, "/metadata", nameof(MetadataHub.OnlySummary))["title"]!.GetValue<string>().ShouldBe(nameof(MetadataHub.OnlySummary));
-        Operation(document, "/metadata", nameof(MetadataHub.OnlySummary))["summary"]!.GetValue<string>().ShouldBe("Summary only");
-        Operation(document, "/metadata", nameof(MetadataHub.XmlOnly))["summary"]!.GetValue<string>().ShouldBe("XML fallback");
-        Operation(document, "/metadata", nameof(MetadataHub.Defaults))["title"]!.GetValue<string>().ShouldBe(nameof(MetadataHub.Defaults));
-        Operation(document, "/metadata", nameof(MetadataHub.Defaults))["summary"].ShouldBeNull();
+        Operation(document, "/metadata", nameof(IMetadataOperations.OnlyContract))["summary"]!.GetValue<string>().ShouldBe("Contract summary");
+        Operation(document, "/metadata", nameof(IMetadataOperations.ClearSummary))["summary"]!.GetValue<string>().ShouldBeEmpty();
+        Operation(document, "/metadata", nameof(IMetadataOperations.OnlyAttributes))["title"]!.GetValue<string>().ShouldBe("AttributeOnly");
+        Operation(document, "/metadata", nameof(IMetadataOperations.OnlySummary))["title"]!.GetValue<string>().ShouldBe(nameof(IMetadataOperations.OnlySummary));
+        Operation(document, "/metadata", nameof(IMetadataOperations.OnlySummary))["summary"]!.GetValue<string>().ShouldBe("Summary only");
+        Operation(document, "/metadata", nameof(IMetadataOperations.XmlOnly))["summary"]!.GetValue<string>().ShouldBe("XML fallback");
+        Operation(document, "/metadata", nameof(IMetadataOperations.Defaults))["title"]!.GetValue<string>().ShouldBe(nameof(IMetadataOperations.Defaults));
+        Operation(document, "/metadata", nameof(IMetadataOperations.Defaults))["summary"].ShouldBeNull();
         Operation(document, "/metadata", nameof(IMetadataClient.Changed), true)["title"]!.GetValue<string>().ShouldBe("ContractNotification");
         Message(document, Operation(document, "/metadata", nameof(IMetadataClient.Changed), true))["title"]!
             .GetValue<string>().ShouldBe("ContractNotification notification");
@@ -265,7 +265,24 @@ public sealed class OperationMetadataTests
     public abstract class LegacyGuardHub : Hub;
 }
 
-public sealed class MetadataHub : Hub<IMetadataClient>, IDocumentedHubEndpoint
+internal interface IMetadataOperations
+{
+    string Read(Guid id);
+
+    void OnlyContract();
+
+    void ClearSummary();
+
+    void OnlyAttributes();
+
+    void OnlySummary();
+
+    void XmlOnly();
+
+    void Defaults();
+}
+
+public sealed class MetadataHub : Hub<IMetadataClient>, IDocumentedHubEndpoint, IMetadataOperations
 {
     public static string Name => "metadata";
 
@@ -318,7 +335,11 @@ public sealed class SecondaryMetadataHub : Hub, IDocumentedHubEndpoint
 
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<SecondaryMetadataHub>("/secondary");
 
-    public string GetState() => "Searching";
+    public string GetState()
+    {
+        Context.ConnectionAborted.ThrowIfCancellationRequested();
+        return "Searching";
+    }
 }
 
 public interface IMetadataClient

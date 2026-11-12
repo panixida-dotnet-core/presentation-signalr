@@ -74,7 +74,7 @@ public sealed class SignalRDocumentationTests
         reply["title"]!.GetValue<string>().ShouldBe("Read response");
         reply["payload"]!["schema"]!["oneOf"]![0]!["properties"]!["result"]!["properties"]!["state"].ShouldNotBeNull();
         reply["payload"]!["schema"]!["oneOf"]![1]!["properties"]!["error"]!["type"]!.GetValue<string>().ShouldBe("string");
-        operations.Any(operation => operation.Key.Contains("Hidden", StringComparison.Ordinal)).ShouldBeFalse();
+        operations.Any(operation => operation.Key.Contains("GetUpdates", StringComparison.Ordinal)).ShouldBeFalse();
         operations.Any(operation => operation.Key.Contains("OnConnected", StringComparison.Ordinal)).ShouldBeFalse();
         operations.Single(operation => operation.Key.Contains("client.Changed@", StringComparison.Ordinal)).Value!["action"]!.GetValue<string>().ShouldBe("send");
         operations.Single(operation => operation.Key.Contains("hub.Watch@", StringComparison.Ordinal)).Value!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
@@ -92,7 +92,7 @@ public sealed class SignalRDocumentationTests
         bulk["payload"]!["schema"]!["properties"]!["arguments"]!["minItems"]!.GetValue<int>().ShouldBe(1);
         var uploadReply = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.Upload@/v1/state.result", StringComparison.Ordinal)).Value!;
         uploadReply["payload"]!["schema"]!["oneOf"]![0]!["properties"]!["result"]!["type"]!.GetValue<string>().ShouldBe("null");
-        operations.Single(operation => operation.Key.Contains("hub.WatchDerived@", StringComparison.Ordinal)).Value!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
+        operations.Single(operation => operation.Key.Contains($"hub.{nameof(IDerivedDocumentationStream.WatchDerived)}@", StringComparison.Ordinal)).Value!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
         var v2 = source.Generate("matchmaking-signalr-v2", TestContext.Current.CancellationToken);
         v2["info"]!["x-deprecated"]!.GetValue<bool>().ShouldBeTrue();
         var configured = v2["components"]!["messages"]!.AsObject().Single(message =>
@@ -262,7 +262,12 @@ public sealed class SignalRDocumentationTests
     public sealed class PlainHub : Hub;
 }
 
-public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHubEndpoint
+internal interface IDerivedDocumentationStream
+{
+    Task<DerivedDocumentationReader> WatchDerived();
+}
+
+public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHubEndpoint, IDerivedDocumentationStream
 {
     private static readonly object UpdatesKey = new();
 
@@ -286,13 +291,10 @@ public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHub
     {
         cancellationToken.ThrowIfCancellationRequested();
         var channel = Channel.CreateUnbounded<DocumentationPayload>();
-        if (Context.Items.TryGetValue(UpdatesKey, out var value) && value is DocumentationPayload[] updates)
+        foreach (var update in GetUpdates())
         {
-            foreach (var update in updates)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                channel.Writer.TryWrite(update);
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            channel.Writer.TryWrite(update);
         }
 
         channel.Writer.Complete();
@@ -314,7 +316,8 @@ public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHub
 
     public void Bulk(IEnumerable<DocumentationPayload> values) => Context.Items[UpdatesKey] = values.ToArray();
 
-    private string Hidden() => "hidden";
+    private DocumentationPayload[] GetUpdates() =>
+        Context.Items.TryGetValue(UpdatesKey, out var value) && value is DocumentationPayload[] updates ? updates : [];
 }
 
 public sealed class DocumentationV2Hub : Hub, IDocumentedHubEndpoint

@@ -237,7 +237,11 @@ public sealed class ConverterSchemaHub : Hub, IDocumentedHubEndpoint
 
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<ConverterSchemaHub>("/converter");
 
-    public ConverterSchemaState Read() => ConverterSchemaState.Ready;
+    public ConverterSchemaState Read()
+    {
+        Context.ConnectionAborted.ThrowIfCancellationRequested();
+        return ConverterSchemaState.Ready;
+    }
 }
 
 public sealed record GeneratedSchemaPayload(Guid? GameId, DateTimeOffset? QueuedAt,
