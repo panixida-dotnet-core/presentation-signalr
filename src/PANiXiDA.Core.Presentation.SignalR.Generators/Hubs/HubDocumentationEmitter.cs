@@ -110,7 +110,7 @@ internal static class HubDocumentationEmitter
             .Append(Literal(target)).Append(", new ").Append(Metadata).AppendLine("HubParameterDescription[] {");
         foreach (var parameter in parameters)
         {
-            AppendParameter(result, parameter);
+            AppendParameter(result, parameter, client);
         }
 
         result.Append("            }, ").Append(returnType is null ? "null" : "typeof(" + TypeName(returnType) + ")")
@@ -118,19 +118,30 @@ internal static class HubDocumentationEmitter
             .Append(", isStream: ").Append(Literal(resultStream))
             .Append(", summary: ").Append(Literal(Summary(method)))
             .Append(", requiresAuthorization: ").Append(Literal(HasMetadata(method, "Microsoft.AspNetCore.Authorization.IAuthorizeData"))).AppendLine(") {")
-            .Append("                MemberName = ").Append(Literal(method.Name)).AppendLine(",")
-            .Append("                Documentation = new global::PANiXiDA.Core.ApiDocumentation.ApiOperationMetadata(")
+            .Append("                MemberName = ").Append(Literal(method.Name)).AppendLine(",");
+        if (returnType is not null && HubPayloadSchemaEmitter.Emit(returnType, isOutput: !client) is { } schema)
+        {
+            result.Append("                ResultSchema = ").Append(schema).AppendLine(",");
+        }
+
+        result.Append("                Documentation = new global::PANiXiDA.Core.ApiDocumentation.ApiOperationMetadata(")
             .Append(Literal(AttributeValue(method, "Microsoft.AspNetCore.Routing.EndpointNameAttribute") ?? method.Name)).Append(", ")
             .Append(Literal(AttributeValue(method, "Microsoft.AspNetCore.Http.EndpointSummaryAttribute") ?? Summary(method))).AppendLine(") },");
     }
 
-    private static void AppendParameter(StringBuilder result, IParameterSymbol parameter)
+    private static void AppendParameter(StringBuilder result, IParameterSymbol parameter, bool client)
     {
         var payload = StreamItem(parameter.Type, out var stream);
         result.Append("                new ").Append(Metadata).Append("HubParameterDescription(")
             .Append(Literal(parameter.Name)).Append(", typeof(").Append(TypeName(payload))
             .Append("), ").Append(Literal(stream))
-            .Append(", allowImplicitServices: ").Append(Literal(parameter.GetAttributes().Length == 0)).AppendLine("),");
+            .Append(", allowImplicitServices: ").Append(Literal(parameter.GetAttributes().Length == 0)).Append(')');
+        if (HubPayloadSchemaEmitter.Emit(payload, isOutput: client) is { } schema)
+        {
+            result.Append(" { Schema = ").Append(schema).Append(" }");
+        }
+
+        result.AppendLine(",");
     }
 
     private static bool ShouldSerialize(IParameterSymbol parameter, bool resultStream, bool client)

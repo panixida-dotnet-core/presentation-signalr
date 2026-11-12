@@ -265,7 +265,6 @@ public sealed class OperationMetadataTests
     public abstract class LegacyGuardHub : Hub;
 }
 
-#pragma warning disable CA1822 // SignalR discovers instance methods as hub endpoints.
 public sealed class MetadataHub : Hub<IMetadataClient>, IDocumentedHubEndpoint
 {
     public static string Name => "metadata";
@@ -321,8 +320,6 @@ public sealed class SecondaryMetadataHub : Hub, IDocumentedHubEndpoint
 
     public string GetState() => "Searching";
 }
-
-#pragma warning restore CA1822
 
 public interface IMetadataClient
 {
