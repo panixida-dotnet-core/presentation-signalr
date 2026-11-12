@@ -9,6 +9,7 @@ internal sealed class HubPayloadSchemaEmitter
     private const string JsonObjectType = "global::System.Text.Json.Nodes.JsonObject";
     private const string JsonArrayType = "global::System.Text.Json.Nodes.JsonArray";
     private const string SchemaType = "global::PANiXiDA.Core.Presentation.SignalR.Documentation.HubPayloadSchema";
+    private const int JsonIgnoreAlways = 1;
 
     private static readonly HashSet<string> Dictionaries = new(StringComparer.Ordinal)
     {
@@ -307,7 +308,8 @@ internal sealed class HubPayloadSchemaEmitter
     private static bool IsIgnored(IPropertySymbol property)
     {
         var attribute = GetAttribute(property, "JsonIgnoreAttribute");
-        return attribute is not null && (attribute.NamedArguments.FirstOrDefault().Value.Value ?? 1) is 1;
+        return attribute is not null &&
+            Equals(attribute.NamedArguments.FirstOrDefault().Value.Value ?? JsonIgnoreAlways, JsonIgnoreAlways);
     }
 
     private static string PropertyName(IPropertySymbol property)
