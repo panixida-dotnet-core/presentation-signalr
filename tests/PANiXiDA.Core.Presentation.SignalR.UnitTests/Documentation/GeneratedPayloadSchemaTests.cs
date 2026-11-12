@@ -143,7 +143,7 @@ public sealed record GeneratedSchemaPayload(Guid? GameId, DateTimeOffset? Queued
     Dictionary<string, GeneratedSchemaNested> Metadata, byte[] Blob, Uri? Link, GeneratedSchemaState Status)
 {
     [JsonIgnore]
-    public string Ignored => "ignored";
+    public string Ignored => DisplayName;
 
     [JsonRequired]
     public bool IsReady { get; init; }

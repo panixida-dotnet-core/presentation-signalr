@@ -8,6 +8,8 @@ internal sealed class HubPayloadSchemaEmitter
     private const string JsonSerialization = "System.Text.Json.Serialization.";
     private const string JsonObjectType = "global::System.Text.Json.Nodes.JsonObject";
     private const string JsonArrayType = "global::System.Text.Json.Nodes.JsonArray";
+    private const string JsonString = "string";
+    private const string JsonInteger = "integer";
     private const string SchemaType = "global::PANiXiDA.Core.Presentation.SignalR.Documentation.HubPayloadSchema";
     private const int JsonIgnoreAlways = 1;
 
@@ -34,16 +36,16 @@ internal sealed class HubPayloadSchemaEmitter
     private static readonly Dictionary<SpecialType, string> ScalarTypes = new()
     {
         [SpecialType.System_Boolean] = "boolean",
-        [SpecialType.System_String] = "string",
-        [SpecialType.System_Char] = "string",
-        [SpecialType.System_Byte] = "integer",
-        [SpecialType.System_SByte] = "integer",
-        [SpecialType.System_Int16] = "integer",
-        [SpecialType.System_UInt16] = "integer",
-        [SpecialType.System_Int32] = "integer",
-        [SpecialType.System_UInt32] = "integer",
-        [SpecialType.System_Int64] = "integer",
-        [SpecialType.System_UInt64] = "integer",
+        [SpecialType.System_String] = JsonString,
+        [SpecialType.System_Char] = JsonString,
+        [SpecialType.System_Byte] = JsonInteger,
+        [SpecialType.System_SByte] = JsonInteger,
+        [SpecialType.System_Int16] = JsonInteger,
+        [SpecialType.System_UInt16] = JsonInteger,
+        [SpecialType.System_Int32] = JsonInteger,
+        [SpecialType.System_UInt32] = JsonInteger,
+        [SpecialType.System_Int64] = JsonInteger,
+        [SpecialType.System_UInt64] = JsonInteger,
         [SpecialType.System_Single] = "number",
         [SpecialType.System_Double] = "number",
         [SpecialType.System_Decimal] = "number"
@@ -271,12 +273,12 @@ internal sealed class HubPayloadSchemaEmitter
     {
         if (type.TypeKind == TypeKind.Enum)
         {
-            return ("integer", null);
+            return (JsonInteger, null);
         }
 
         if (type is IArrayTypeSymbol { Rank: 1, ElementType.SpecialType: SpecialType.System_Byte })
         {
-            return ("string", "byte");
+            return (JsonString, "byte");
         }
 
         if (ScalarTypes.TryGetValue(type.SpecialType, out var scalar))
@@ -285,15 +287,15 @@ internal sealed class HubPayloadSchemaEmitter
         }
 
         return StringFormats.TryGetValue(type.WithNullableAnnotation(NullableAnnotation.NotAnnotated).ToDisplayString(), out var format)
-            ? ("string", format)
+            ? (JsonString, format)
             : null;
     }
 
     private static bool HasCustomContract(ISymbol symbol)
     {
-        foreach (var attribute in symbol.GetAttributes())
+        foreach (var attributeType in symbol.GetAttributes().Select(attribute => attribute.AttributeClass))
         {
-            for (var type = attribute.AttributeClass; type is not null; type = type.BaseType)
+            for (var type = attributeType; type is not null; type = type.BaseType)
             {
                 if (CustomContractAttributes.Contains(type.ToDisplayString()))
                 {
