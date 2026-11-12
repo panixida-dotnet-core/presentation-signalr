@@ -73,16 +73,27 @@ public sealed class GeneratedPayloadSchemaTests
         var inputPayload = inputBox["properties"]!["value"]!;
         inputPayload["type"]!.AsArray().Select(item => item!.GetValue<string>()).ShouldBe(["object", "null"]);
         inputPayload["properties"]!["name"]!["type"]!.GetValue<string>().ShouldBe("string");
-        inputPayload["properties"]!["readOnly"].ShouldBeNull();
-        inputPayload["properties"]!["writeOnly"].ShouldNotBeNull();
+        var inputProperties = inputPayload["properties"]!;
+        inputProperties["readOnly"].ShouldNotBeNull();
+        inputProperties["presentation"].ShouldBeNull();
+        inputProperties["writeOnly"].ShouldNotBeNull();
+        inputProperties["normalized"]!["type"]!.AsArray().Select(item => item!.GetValue<string>()).ShouldBe(["string", "null"]);
+        inputProperties["hint"]!["type"]!.AsArray().Select(item => item!.GetValue<string>()).ShouldBe(["string", "null"]);
+        inputProperties["key"]!["type"]!.GetValue<string>().ShouldBe("string");
         inputPayload["required"]!.AsArray().Select(item => item!.GetValue<string>())
-            .ShouldBe(["sequence", "count", "note", "token"], ignoreOrder: true);
+            .ShouldBe(["sequence", "count", "note", "readOnly", "normalized", "hint", "key", "token", "setOnly"], ignoreOrder: true);
 
         var outputPayload = output["properties"]!["value"]!["properties"]!["value"]!;
-        outputPayload["properties"]!["readOnly"].ShouldNotBeNull();
-        outputPayload["properties"]!["writeOnly"].ShouldBeNull();
+        var outputProperties = outputPayload["properties"]!;
+        outputProperties["readOnly"].ShouldNotBeNull();
+        outputProperties["presentation"].ShouldNotBeNull();
+        outputProperties["writeOnly"].ShouldBeNull();
+        outputProperties["setOnly"].ShouldBeNull();
+        outputProperties["normalized"]!["type"]!.GetValue<string>().ShouldBe("string");
+        outputProperties["hint"]!["type"]!.GetValue<string>().ShouldBe("string");
+        outputProperties["key"]!["type"]!.AsArray().Select(item => item!.GetValue<string>()).ShouldBe(["string", "null"]);
         outputPayload["required"]!.AsArray().Select(item => item!.GetValue<string>())
-            .ShouldBe(["sequence", "token"], ignoreOrder: true);
+            .ShouldBe(["sequence", "readOnly", "normalized", "hint", "key", "token"], ignoreOrder: true);
     }
 
     [Fact(DisplayName = "A custom JSON type resolver requires explicit documentation metadata")]
@@ -236,7 +247,8 @@ public sealed record GeneratedSchemaPayload(Guid? GameId, DateTimeOffset? Queued
 public sealed record SchemaBox<T>(T Value);
 
 [method: SetsRequiredMembers]
-public sealed class InitializedSchemaPayload(int sequence, int count, string? note)
+public sealed class InitializedSchemaPayload(int sequence, int count, string? note, string? readOnly,
+    string? normalized, [AllowNull] string hint, [DisallowNull] string? key)
 {
     public int Sequence { get; } = sequence;
 
@@ -246,8 +258,17 @@ public sealed class InitializedSchemaPayload(int sequence, int count, string? no
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Note { get; } = note;
 
+    public string Normalized { get; } = normalized ?? "default";
+
+    public string Hint { get; } = hint ?? "default";
+
+    public string? Key { get; } = key;
+
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenReading)]
-    public string? ReadOnly { get; init; }
+    public string? ReadOnly { get; } = readOnly;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenReading)]
+    public string? Presentation { get; init; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? WriteOnly { get; init; }
@@ -256,6 +277,9 @@ public sealed class InitializedSchemaPayload(int sequence, int count, string? no
 
     [JsonRequired]
     public string? Token { get; init; }
+
+    [JsonRequired]
+    public int SetOnly { private get; init; }
 }
 
 public sealed record GeneratedSchemaNested(int Count)

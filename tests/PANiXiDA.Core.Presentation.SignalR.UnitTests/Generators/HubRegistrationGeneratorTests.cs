@@ -511,7 +511,15 @@ public sealed class HubRegistrationGeneratorTests
             public sealed class Initialized
             {
                 [SetsRequiredMembers]
-                public Initialized(int count, string? note) { Count = count; Note = note; Name = "default"; }
+                public Initialized(int count, string? note, int readOnly, [AllowNull] string hint, [DisallowNull] string? key)
+                {
+                    Count = count;
+                    Note = note;
+                    ReadOnly = readOnly;
+                    Hint = hint ?? "default";
+                    Key = key;
+                    Name = "default";
+                }
 
                 [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
                 public int Count { get; }
@@ -519,8 +527,15 @@ public sealed class HubRegistrationGeneratorTests
                 [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
                 public string? Note { get; }
 
+                public string Hint { get; }
+
+                public string? Key { get; }
+
                 [JsonIgnore(Condition = JsonIgnoreCondition.WhenReading)]
-                public string? ReadOnly { get; init; }
+                public int ReadOnly { get; }
+
+                [JsonIgnore(Condition = JsonIgnoreCondition.WhenReading)]
+                public string? Presentation { get; init; }
 
                 [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
                 public string? WriteOnly { get; init; }

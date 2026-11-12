@@ -394,7 +394,7 @@ The generator discovers inherited methods, async results, typed callbacks and bo
 
 Custom awaitables supported by the SignalR dispatcher, such as the return value of `ConfigureAwait`, are documented using their awaited result. Use `Task` or `ValueTask` for Native AOT hub methods.
 
-Connect the independent presenter. The hub generator supplies schemas for ordinary payloads. Root reference values, collection elements, dictionary values and properties declared as generic type parameters allow null. Request and reply schemas account for JSON properties ignored on read or write:
+Connect the independent presenter. The hub generator supplies schemas for ordinary payloads. Root reference values, collection elements, dictionary values and properties declared as generic type parameters allow null. Request and reply schemas account for directional JSON ignore conditions and constructor parameter nullability:
 
 ```csharp
 builder.Services.AddSignalR(builder.Configuration);

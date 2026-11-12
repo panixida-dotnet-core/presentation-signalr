@@ -6,6 +6,7 @@ namespace PANiXiDA.Core.Presentation.SignalR.Generators.Hubs;
 internal sealed class HubPayloadSchemaEmitter(bool isOutput)
 {
     private const string JsonSerialization = "System.Text.Json.Serialization.";
+    private const string CodeAnalysis = "System.Diagnostics.CodeAnalysis.";
     private const string JsonObjectType = "global::System.Text.Json.Nodes.JsonObject";
     private const string JsonArrayType = "global::System.Text.Json.Nodes.JsonArray";
     private const string JsonString = "string";
@@ -189,26 +190,25 @@ internal sealed class HubPayloadSchemaEmitter(bool isOutput)
         var properties = new List<string>();
         var required = new List<string>();
         var constructor = GetJsonConstructor(type);
-        var constructorParameters = constructor?.Parameters.Where(parameter => !parameter.IsOptional) ?? [];
         var setsRequiredMembers = constructor is not null &&
-            HasAttribute(constructor, "System.Diagnostics.CodeAnalysis.SetsRequiredMembersAttribute");
+            HasAttribute(constructor, CodeAnalysis + "SetsRequiredMembersAttribute");
         foreach (var property in members)
         {
+            var parameter = FindConstructorParameter(constructor, property);
             var ignoreCondition = GetIgnoreCondition(property);
-            if (ignoreCondition == (isOutput ? JsonIgnoreWhenWriting : JsonIgnoreWhenReading))
+            if (!IncludesProperty(property, parameter, ignoreCondition))
             {
                 continue;
             }
 
-            var enforceReferenceNullability = property.OriginalDefinition.Type.TypeKind != TypeKind.TypeParameter;
-            if (HasCustomContract(property) || Build(property.Type, enforceReferenceNullability) is not { } schema)
+            if (BuildProperty(property, parameter) is not { } schema)
             {
                 return null;
             }
 
             var name = PropertyName(property);
             properties.Add($"{{ {name}, {schema} }}");
-            if (IsRequired(property, ignoreCondition, setsRequiredMembers, constructorParameters))
+            if (IsRequired(property, parameter, ignoreCondition, setsRequiredMembers))
             {
                 required.Add(name);
             }
@@ -221,8 +221,47 @@ internal sealed class HubPayloadSchemaEmitter(bool isOutput)
                 ("required", $"new {JsonArrayType}({string.Join(", ", required)})"));
     }
 
-    private bool IsRequired(IPropertySymbol property, int ignoreCondition, bool setsRequiredMembers,
-        IEnumerable<IParameterSymbol> constructorParameters)
+    private static IParameterSymbol? FindConstructorParameter(IMethodSymbol? constructor, IPropertySymbol property) =>
+        constructor?.Parameters.FirstOrDefault(parameter => StringComparer.OrdinalIgnoreCase.Equals(parameter.Name, property.Name) &&
+            SymbolEqualityComparer.Default.Equals(parameter.Type, property.Type));
+
+    private bool IncludesProperty(IPropertySymbol property, IParameterSymbol? parameter, int ignoreCondition) =>
+        isOutput
+            ? property.GetMethod?.DeclaredAccessibility == Accessibility.Public && ignoreCondition != JsonIgnoreWhenWriting
+            : ignoreCondition != JsonIgnoreWhenReading || parameter is not null;
+
+    private string? BuildProperty(IPropertySymbol property, IParameterSymbol? parameter)
+    {
+        if (HasCustomContract(property))
+        {
+            return null;
+        }
+
+        if (!isOutput && parameter is not null)
+        {
+            return Build(parameter.Type.WithNullableAnnotation(GetParameterNullability(parameter)), enforceReferenceNullability: true);
+        }
+
+        return Build(property.Type, enforceReferenceNullability: property.OriginalDefinition.Type.TypeKind != TypeKind.TypeParameter);
+    }
+
+    private static NullableAnnotation GetParameterNullability(IParameterSymbol parameter)
+    {
+        if (HasAttribute(parameter, CodeAnalysis + "DisallowNullAttribute"))
+        {
+            return NullableAnnotation.NotAnnotated;
+        }
+
+        if (HasAttribute(parameter, CodeAnalysis + "AllowNullAttribute") ||
+            parameter.OriginalDefinition.Type.TypeKind == TypeKind.TypeParameter)
+        {
+            return NullableAnnotation.Annotated;
+        }
+
+        return parameter.NullableAnnotation;
+    }
+
+    private bool IsRequired(IPropertySymbol property, IParameterSymbol? parameter, int ignoreCondition, bool setsRequiredMembers)
     {
         if (isOutput && ignoreCondition is JsonIgnoreWhenWritingDefault or JsonIgnoreWhenWritingNull)
         {
@@ -231,8 +270,7 @@ internal sealed class HubPayloadSchemaEmitter(bool isOutput)
 
         return (property.IsRequired && !setsRequiredMembers) ||
             HasAttribute(property, JsonSerialization + "JsonRequiredAttribute") ||
-            constructorParameters.Any(parameter => StringComparer.OrdinalIgnoreCase.Equals(parameter.Name, property.Name) &&
-                SymbolEqualityComparer.Default.Equals(parameter.Type, property.Type));
+            parameter is { IsOptional: false };
     }
 
     private static List<IPropertySymbol>? GetProperties(INamedTypeSymbol type)
