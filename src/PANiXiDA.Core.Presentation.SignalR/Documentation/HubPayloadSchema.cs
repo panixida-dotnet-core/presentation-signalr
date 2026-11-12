@@ -44,10 +44,25 @@ public sealed class HubPayloadSchema
             RespectRequiredConstructorParameters: true
         };
 
-        return standardContract && options.TypeInfoResolverChain.All(IsStandardResolver) &&
+        return standardContract && !IgnoresNullValues(options) && options.TypeInfoResolverChain.All(IsStandardResolver) &&
             !options.Converters.Any(converter => _types.Any(converter.CanConvert))
             ? _create(options.PropertyNamingPolicy)
             : null;
+    }
+
+    private static bool IgnoresNullValues(JsonSerializerOptions options)
+    {
+        var copy = new JsonSerializerOptions(options);
+        try
+        {
+            // The legacy IgnoreNullValues setting prevents setting a default ignore condition.
+            copy.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
+        }
     }
 
     private static bool IsStandardResolver(IJsonTypeInfoResolver resolver) =>

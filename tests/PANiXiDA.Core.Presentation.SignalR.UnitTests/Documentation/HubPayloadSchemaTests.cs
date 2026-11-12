@@ -70,6 +70,23 @@ public sealed class HubPayloadSchemaTests
         schema.Create(options).ShouldBeNull();
     }
 
+    [Fact(DisplayName = "Legacy null omission requires explicit documentation metadata")]
+    public void DefersToExplicitContextForLegacyNullOmission()
+    {
+        var options = new JsonSerializerOptions
+        {
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+            RespectNullableAnnotations = true,
+            RespectRequiredConstructorParameters = true
+        };
+        typeof(JsonSerializerOptions).GetProperty("IgnoreNullValues")!.SetValue(options, true);
+        options.MakeReadOnly();
+        var schema = new HubPayloadSchema(_ => new JsonObject(), typeof(string));
+
+        schema.Create(options).ShouldBeNull();
+        options.DefaultIgnoreCondition.ShouldBe(JsonIgnoreCondition.Never);
+    }
+
     [Theory(DisplayName = "Generated schemas require unmodified built-in JSON resolvers")]
     [InlineData("default", true)]
     [InlineData("modified", false)]
