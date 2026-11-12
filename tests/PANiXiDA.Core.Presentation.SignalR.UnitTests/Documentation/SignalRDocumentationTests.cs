@@ -262,7 +262,6 @@ public sealed class SignalRDocumentationTests
     public sealed class PlainHub : Hub;
 }
 
-#pragma warning disable IDE0060 // Keep the signatures used by the documentation tests.
 public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHubEndpoint
 {
     public static string Name => "matchmaking";
@@ -304,8 +303,6 @@ public sealed class DocumentationV2Hub : Hub, IDocumentedHubEndpoint
     public ConfiguredTaskAwaitable<DocumentationPayload> Read() =>
         Task.FromResult(new DocumentationPayload(Guid.Empty, "ready")).ConfigureAwait(false);
 }
-
-#pragma warning restore IDE0060
 
 public interface IDocumentationClient
 {
