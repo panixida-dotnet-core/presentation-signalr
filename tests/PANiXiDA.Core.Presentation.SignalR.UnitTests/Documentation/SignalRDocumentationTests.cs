@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 using PANiXiDA.Core.ApiDocumentation;
@@ -211,7 +212,7 @@ public sealed class SignalRDocumentationTests
         message["payload"]!["schema"]!["properties"]!["arguments"]!["minItems"]!.GetValue<int>().ShouldBe(disableImplicitServices ? 2 : 1);
     }
 
-    [Fact(DisplayName = "Documentation works with service providers that do not expose service introspection")]
+    [Fact(DisplayName = "Documentation works with service providers that expose neither introspection nor host lifetime")]
     public async Task SupportsNonIntrospectingProviders()
     {
         var builder = WebApplication.CreateSlimBuilder();
@@ -257,7 +258,9 @@ public sealed class SignalRDocumentationTests
 
     private sealed class NonIntrospectingProvider(IServiceProvider services) : IServiceProvider
     {
-        public object? GetService(Type serviceType) => serviceType == typeof(IServiceProviderIsService) ? null : services.GetService(serviceType);
+        public object? GetService(Type serviceType) => serviceType == typeof(IServiceProviderIsService) || serviceType == typeof(IHostApplicationLifetime)
+            ? null
+            : services.GetService(serviceType);
     }
     public sealed class PlainHub : Hub;
 }
