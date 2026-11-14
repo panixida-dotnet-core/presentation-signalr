@@ -237,6 +237,30 @@ public sealed class OperationMetadataTests
         HubDocumentationRegistry.Find(typeof(LegacyGuardHub))!.Operations.ShouldBeEmpty();
     }
 
+
+    [Fact(DisplayName = "Repeated SignalR documentation requests reuse materialized route groups")]
+    public async Task ReusesRouteGroupsAfterStartup()
+    {
+        await using var app = CreateApplication();
+        var materializations = 0;
+        app.MapGroup("/api").MapGet("/unrelated", static () => "ready")
+            .Add(_ => materializations++);
+        app.UseSignalR(hubs => hubs.MapHub<MetadataHub>("/metadata")
+            .WithOperation(nameof(MetadataHub.Read), name: "Updated read"));
+
+        await app.StartAsync(TestContext.Current.CancellationToken);
+        _ = app.Services.GetRequiredService<EndpointDataSource>().Endpoints;
+        var initialMaterializations = materializations;
+
+        var first = Generate(app);
+        var second = Generate(app);
+
+        initialMaterializations.ShouldBeGreaterThan(0);
+        materializations.ShouldBe(initialMaterializations);
+        Operation(first, "/metadata", "wire-read")["title"]!.GetValue<string>().ShouldBe("Updated read");
+        JsonNode.DeepEquals(first, second).ShouldBeTrue();
+    }
+
     private static WebApplication CreateApplication()
     {
         var builder = WebApplication.CreateSlimBuilder();

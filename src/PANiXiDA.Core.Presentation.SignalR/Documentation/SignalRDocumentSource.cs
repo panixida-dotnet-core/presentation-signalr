@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 using PANiXiDA.Core.ApiDocumentation;
@@ -50,7 +51,9 @@ internal sealed class SignalRDocumentSource(
             ?? throw new ArgumentException($"SignalR document '{documentName}' was not found.", nameof(documentName));
         var operations = new List<AsyncApiOperation>();
         var serviceTypes = services.GetService<IServiceProviderIsService>();
-        var endpoints = mappings.Endpoints?.Invoke() ?? services.GetRequiredService<EndpointDataSource>().Endpoints;
+        var endpoints = services.GetService<IHostApplicationLifetime>()?.ApplicationStarted.IsCancellationRequested == true
+            ? services.GetRequiredService<EndpointDataSource>().Endpoints
+            : mappings.Endpoints?.Invoke() ?? services.GetRequiredService<EndpointDataSource>().Endpoints;
         foreach (var hub in mappings.Hubs.Where(hub => hub.Description.Document.Name == documentName))
         {
             cancellationToken.ThrowIfCancellationRequested();
