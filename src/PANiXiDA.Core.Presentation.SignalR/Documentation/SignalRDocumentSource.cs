@@ -161,7 +161,7 @@ internal sealed class SignalRDocumentSource(
         {
             [Target] = method.Name,
             ["streamResult"] = method.IsStream,
-            ["authorizationRequired"] = !method.IsClientMethod && (context.Authorized || method.RequiresAuthorization),
+            ["authorizationRequired"] = context.Authorized || (!method.IsClientMethod && method.RequiresAuthorization),
             ["inputStreams"] = streamNames,
             ["protocols"] = context.Protocols.DeepClone(),
             ["transports"] = TransportNames(context.Transports),
