@@ -412,6 +412,10 @@ Pass an application-owned source-generated context to `AddApiDocumentation(confi
 
 `/asyncapi/matchmaking-signalr-v1.json` contains actual paths, arguments, replies, callbacks and streams. `x-signalr` bindings report targets, protocols, mapped transports and authorization, including the fallback policy configured in `AuthorizationOptions`. JSON envelopes contain generated payload schemas. Completion errors remain strings. MessagePack uses its binary protocol encoding. Untyped `Clients.SendAsync` calls require a custom document source because their runtime target strings cannot be inferred reliably.
 
+For typed client callbacks, `authorizationRequired` reflects the hub endpoint's authorization requirement, including the fallback policy and `AllowAnonymous` metadata. Hub method operations also account for method-level authorization.
+
+`x-signalr` contains the SignalR metadata consumed by the console. Its `transports` field lists the allowed transports; no separate `transportProtocol` marker is emitted.
+
 Versions describe documents; routes and transport negotiation remain application-owned. ASP.NET Core restrictions for `Hub<TClient>` and value-type upload streams remain.
 
 ## Project Structure

@@ -61,6 +61,7 @@ public sealed class SignalRDocumentationTests
         foreach (var operation in operations.Select(operation => operation.Value!))
         {
             operation["channel"]!["$ref"]!.GetValue<string>().ShouldBe("#/channels/~1v1~1state");
+            operation["bindings"]!["x-signalr"]!.AsObject().ContainsKey("transportProtocol").ShouldBeFalse();
             if (operation["reply"] is { } completion)
             {
                 JsonNode.DeepEquals(operation["channel"], completion["channel"]).ShouldBeTrue();
@@ -77,7 +78,9 @@ public sealed class SignalRDocumentationTests
         reply["payload"]!["schema"]!["oneOf"]![1]!["properties"]!["error"]!["type"]!.GetValue<string>().ShouldBe("string");
         operations.Any(operation => operation.Key.Contains("GetUpdates", StringComparison.Ordinal)).ShouldBeFalse();
         operations.Any(operation => operation.Key.Contains("OnConnected", StringComparison.Ordinal)).ShouldBeFalse();
-        operations.Single(operation => operation.Key.Contains("client.Changed@", StringComparison.Ordinal)).Value!["action"]!.GetValue<string>().ShouldBe("send");
+        var callback = operations.Single(operation => operation.Key.Contains("client.Changed@", StringComparison.Ordinal)).Value!;
+        callback["action"]!.GetValue<string>().ShouldBe("send");
+        callback["bindings"]!["x-signalr"]!["authorizationRequired"]!.GetValue<bool>().ShouldBeTrue();
         operations.Single(operation => operation.Key.Contains("hub.Watch@", StringComparison.Ordinal)).Value!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
         operations.Single(operation => operation.Key.Contains(".upload.updates", StringComparison.Ordinal)).Value!["action"]!.GetValue<string>().ShouldBe("receive");
         var message = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.read-state@/v1/state", StringComparison.Ordinal)).Value!;
@@ -112,21 +115,32 @@ public sealed class SignalRDocumentationTests
         await app.StopAsync(TestContext.Current.CancellationToken);
     }
 
-    [Theory(DisplayName = "Fallback authorization applies to hub documentation unless the endpoint allows anonymous access")]
-    [InlineData(false, false, false)]
-    [InlineData(true, false, true)]
-    [InlineData(true, true, false)]
-    public async Task HonorsFallbackAuthorization(bool fallback, bool anonymous, bool expected)
+    [Theory(DisplayName = "Hub authorization applies to invocations and client callbacks unless the endpoint allows anonymous access")]
+    [InlineData(false, false, false, false)]
+    [InlineData(true, false, false, true)]
+    [InlineData(false, true, false, true)]
+    [InlineData(true, true, false, true)]
+    [InlineData(false, false, true, false)]
+    [InlineData(true, false, true, false)]
+    [InlineData(false, true, true, false)]
+    [InlineData(true, true, true, false)]
+    public async Task HonorsHubAuthorization(bool required, bool fallback, bool anonymous, bool expected)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Services.AddSignalR(builder.Configuration);
         builder.Services.AddAuthorizationBuilder().SetFallbackPolicy(
             fallback ? new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build() : null);
+        builder.Services.AddSingleton<DocumentationDependency>();
         builder.Services.AddApiDocumentationSchemas(DocumentationJsonContext.Default);
         await using var app = builder.Build();
         app.UseSignalR(hubs =>
         {
-            var endpoint = hubs.MapHub<DocumentationV2Hub>("/fallback");
+            var endpoint = hubs.MapHub<DocumentationHub>("/authorization");
+            if (required)
+            {
+                endpoint.RequireAuthorization();
+            }
+
             if (anonymous)
             {
                 endpoint.AllowAnonymous();
@@ -134,9 +148,11 @@ public sealed class SignalRDocumentationTests
         });
 
         var source = app.Services.GetServices<IApiDocumentSource>().OfType<IAsyncApiDocumentSource>().Single();
-        var document = source.Generate("matchmaking-signalr-v2", TestContext.Current.CancellationToken);
+        var document = source.Generate("matchmaking-signalr-v1", TestContext.Current.CancellationToken);
         var operations = document["operations"]!.AsObject().Select(operation => operation.Value!).ToArray();
         operations.ShouldNotBeEmpty();
+        operations.ShouldContain(operation => operation["action"]!.GetValue<string>() == "send" &&
+            operation["bindings"]!["x-signalr"]!["target"]!.GetValue<string>() == nameof(IDocumentationClient.Changed));
         operations.ShouldAllBe(operation => operation["bindings"]!["x-signalr"]!["authorizationRequired"]!.GetValue<bool>() == expected);
     }
 
@@ -246,7 +262,6 @@ public sealed class SignalRDocumentationTests
         var binding = document["operations"]!.AsObject().Single().Value!["bindings"]!["x-signalr"]!;
         binding["transports"]!.AsArray().Select(node => node!.GetValue<string>()).ShouldBe([transport.ToString()]);
         binding["protocols"]!.AsArray().Count.ShouldBe(protocolCount);
-        binding["transportProtocol"]!.GetValue<string>().ShouldBe(transport == HttpTransportType.WebSockets ? "ws" : "http");
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
         using var client = new HttpClient { BaseAddress = new Uri(address) };
         using var response = await client.PostAsync("/limited/negotiate?negotiateVersion=1", null, TestContext.Current.CancellationToken);
