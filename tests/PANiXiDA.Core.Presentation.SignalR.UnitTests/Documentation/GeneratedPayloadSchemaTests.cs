@@ -63,7 +63,9 @@ public sealed class GeneratedPayloadSchemaTests
         var document = GenerateDocument(app, "constructed");
         var request = document["components"]!["messages"]!.AsObject().Single(message =>
             !message.Value!["name"]!.GetValue<string>().EndsWith(".result", StringComparison.Ordinal)).Value!;
-        var input = request["payload"]!["schema"]!["properties"]!["arguments"]!["prefixItems"]![0]!;
+        var inputModels = request["payload"]!["schema"]!["properties"]!["arguments"]!["$defs"]!.AsObject();
+        inputModels.Single().Key.ShouldBe("SchemaBoxOfSchemaBoxOfInitializedSchemaPayload");
+        var input = inputModels.Single().Value!;
         var output = GetResultSchema(document);
 
         input["type"]!.AsArray().Select(item => item!.GetValue<string>()).ShouldBe(["object", "null"]);

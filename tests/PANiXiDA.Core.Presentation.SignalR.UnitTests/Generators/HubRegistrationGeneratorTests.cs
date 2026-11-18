@@ -151,7 +151,7 @@ public sealed class HubRegistrationGeneratorTests
             app.UseSignalR(external, local, local);
 
             HubEndpoints(app).Select(endpoint => endpoint.RoutePattern.RawText)
-                .ShouldBe(["/external", "/constructed", "/converter", "/v1/state", "/v2/state", "/generated", "/metadata", "/secondary",
+                .ShouldBe(["/external", "/constructed", "/converter", "/v1/state", "/v2/state", "/generated", "/metadata", "/recursive", "/secondary",
                     "/hubs/other", "/hubs/events"]);
         }
         finally
