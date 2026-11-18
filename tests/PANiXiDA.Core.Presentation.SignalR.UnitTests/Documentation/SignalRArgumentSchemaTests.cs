@@ -161,8 +161,17 @@ public sealed class RecursiveArgumentHub : Hub, IDocumentedHubEndpoint
     public static string Summary => "Argument schemas";
     public static ApiVersion ApiVersion => new(1, 0);
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<RecursiveArgumentHub>("/recursive");
-    public RecursiveArgument Echo(RecursiveArgument value) => value;
-    public RecursiveArgument[] EchoArray(RecursiveArgument[] values) => values;
+    public RecursiveArgument Echo(RecursiveArgument value)
+    {
+        Context.ConnectionAborted.ThrowIfCancellationRequested();
+        return value;
+    }
+
+    public RecursiveArgument[] EchoArray(RecursiveArgument[] values)
+    {
+        Context.ConnectionAborted.ThrowIfCancellationRequested();
+        return values;
+    }
 }
 
 public sealed record RecursiveArgument(string Name, RecursiveArgument? Next);
