@@ -414,6 +414,8 @@ Pass an application-owned source-generated context to `AddApiDocumentation(confi
 
 For typed client callbacks, `authorizationRequired` reflects the hub endpoint's authorization requirement, including the fallback policy and `AllowAnonymous` metadata. Hub method operations also account for method-level authorization.
 
+`x-signalr` contains the SignalR metadata consumed by the console. Its `transports` field lists the allowed transports; no separate `transportProtocol` marker is emitted.
+
 Versions describe documents; routes and transport negotiation remain application-owned. ASP.NET Core restrictions for `Hub<TClient>` and value-type upload streams remain.
 
 ## Project Structure

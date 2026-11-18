@@ -61,6 +61,7 @@ public sealed class SignalRDocumentationTests
         foreach (var operation in operations.Select(operation => operation.Value!))
         {
             operation["channel"]!["$ref"]!.GetValue<string>().ShouldBe("#/channels/~1v1~1state");
+            operation["bindings"]!["x-signalr"]!.AsObject().ContainsKey("transportProtocol").ShouldBeFalse();
             if (operation["reply"] is { } completion)
             {
                 JsonNode.DeepEquals(operation["channel"], completion["channel"]).ShouldBeTrue();
@@ -261,7 +262,6 @@ public sealed class SignalRDocumentationTests
         var binding = document["operations"]!.AsObject().Single().Value!["bindings"]!["x-signalr"]!;
         binding["transports"]!.AsArray().Select(node => node!.GetValue<string>()).ShouldBe([transport.ToString()]);
         binding["protocols"]!.AsArray().Count.ShouldBe(protocolCount);
-        binding["transportProtocol"]!.GetValue<string>().ShouldBe(transport == HttpTransportType.WebSockets ? "ws" : "http");
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
         using var client = new HttpClient { BaseAddress = new Uri(address) };
         using var response = await client.PostAsync("/limited/negotiate?negotiateVersion=1", null, TestContext.Current.CancellationToken);

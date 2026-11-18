@@ -144,8 +144,7 @@ internal sealed class SignalRDocumentSource(
                         ["parameter"] = parameter.Name,
                         ["messageType"] = "streamItem",
                         ["authorizationRequired"] = context.Authorized || method.RequiresAuthorization,
-                        ["transports"] = TransportNames(context.Transports),
-                        ["transportProtocol"] = context.WireProtocol
+                        ["transports"] = TransportNames(context.Transports)
                     }
                 }
             };
@@ -164,8 +163,7 @@ internal sealed class SignalRDocumentSource(
             ["authorizationRequired"] = context.Authorized || (!method.IsClientMethod && method.RequiresAuthorization),
             ["inputStreams"] = streamNames,
             ["protocols"] = context.Protocols.DeepClone(),
-            ["transports"] = TransportNames(context.Transports),
-            ["transportProtocol"] = context.WireProtocol
+            ["transports"] = TransportNames(context.Transports)
         };
         var message = new AsyncApiMessage(id, InvocationSchema(method, parameters, streamNames.Count))
         {
