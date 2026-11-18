@@ -187,17 +187,29 @@ internal sealed class SignalRDocumentSource(
 
     private JsonObject InvocationSchema(HubMethodDescription method, HubParameterDescription[] parameters, int streams)
     {
-        var argumentSchemas = new JsonArray([.. parameters.Where(parameter => !parameter.IsStream)
-            .Select((parameter, index) => GetSchema(parameter.Type, parameter.Schema, "#/properties/arguments/prefixItems/" + index))]);
+        var serializedParameters = parameters.Where(parameter => !parameter.IsStream).ToArray();
         var arguments = new JsonObject
         {
             ["type"] = "array",
-            ["minItems"] = argumentSchemas.Count,
-            ["maxItems"] = argumentSchemas.Count
+            ["minItems"] = serializedParameters.Length,
+            ["maxItems"] = serializedParameters.Length
         };
-        if (argumentSchemas.Count > 0)
+        if (serializedParameters.Length == 1)
         {
-            arguments["prefixItems"] = argumentSchemas;
+            var parameter = serializedParameters[0];
+            var name = GetArgumentTypeName(parameter.Type);
+            var reference = "#/properties/arguments/$defs/" + name
+                .Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal);
+            arguments["$defs"] = new JsonObject
+            {
+                [name] = GetSchema(parameter.Type, parameter.Schema, reference)
+            };
+            arguments["items"] = new JsonObject { ["$ref"] = reference };
+        }
+        else if (serializedParameters.Length > 1)
+        {
+            arguments["prefixItems"] = new JsonArray([.. serializedParameters.Select((parameter, index) =>
+                GetSchema(parameter.Type, parameter.Schema, "#/properties/arguments/prefixItems/" + index))]);
         }
 
         var properties = new JsonObject
@@ -226,6 +238,28 @@ internal sealed class SignalRDocumentSource(
         }
 
         return new JsonObject { ["type"] = "object", ["properties"] = properties, ["required"] = required };
+    }
+
+    private static string GetArgumentTypeName(Type type)
+    {
+        if (type.IsArray)
+        {
+            return GetArgumentTypeName(type.GetElementType()!) + "Array";
+        }
+
+        if (!type.IsConstructedGenericType)
+        {
+            return type.Name;
+        }
+
+        var name = type.Name;
+        var separator = name.IndexOf('`');
+        if (separator >= 0)
+        {
+            name = name[..separator];
+        }
+
+        return name + "Of" + string.Join("And", type.GenericTypeArguments.Select(GetArgumentTypeName));
     }
 
     private static Type GetServiceType(Type type) => type.IsConstructedGenericType &&
