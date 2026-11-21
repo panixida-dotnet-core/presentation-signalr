@@ -48,7 +48,6 @@ internal sealed class SignalRDocumentSource(
 
     public JsonObject Generate(string documentName, CancellationToken cancellationToken = default)
     {
-        // IAsyncApiDocumentSource exposes synchronous generation.
         return GenerateDocumentAsync(documentName, cancellationToken).GetAwaiter().GetResult();
     }
 
