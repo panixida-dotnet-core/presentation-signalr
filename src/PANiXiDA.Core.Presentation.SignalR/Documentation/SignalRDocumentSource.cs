@@ -97,7 +97,7 @@ internal sealed partial class SignalRDocumentSource(
     }
 
     private static JsonObject BuildDocument(ApiDocumentDescriptor descriptor, IEnumerable<AsyncApiOperation> operations,
-        IReadOnlyDictionary<string, MappedHubDescription> channels)
+        Dictionary<string, MappedHubDescription> channels)
     {
         var document = AsyncApiDocumentBuilder.Build(descriptor, operations);
         foreach (var (key, channel) in document["channels"]!.AsObject())
