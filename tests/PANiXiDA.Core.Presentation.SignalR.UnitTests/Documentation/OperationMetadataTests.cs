@@ -115,6 +115,17 @@ public sealed class OperationMetadataTests
         HasChannel(operations["wire-read-2"]!, "/second").ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "Targets without ASCII slug characters use a fallback operation ID and keep the wire name")]
+    public async Task NonAsciiTargetKeepsItsWireName()
+    {
+        await using var app = CreateApplication();
+        app.UseSignalR(hubs => hubs.MapHub<SecondaryMetadataHub>("/secondary"));
+
+        var document = Generate(app);
+
+        document["operations"]!["operation"].ShouldBeSameAs(Operation(document, "/secondary", "更新"));
+    }
+
     [Fact(DisplayName = "Changing display names only changes operation and message titles while preserving the complete transport contract")]
     public async Task RenamesOnlyDocumentationTitles()
     {
@@ -382,6 +393,7 @@ public sealed class SecondaryMetadataHub : Hub, IDocumentedHubEndpoint
 
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<SecondaryMetadataHub>("/secondary");
 
+    [HubMethodName("更新")]
     public string GetState()
     {
         Context.ConnectionAborted.ThrowIfCancellationRequested();
