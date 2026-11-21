@@ -63,7 +63,7 @@ internal sealed class SignalRDocumentSource(
             var overrides = endpoint?.Metadata.GetOrderedMetadata<HubOperationOverride>() ?? [];
             ValidateOverrides(hub.Description, overrides);
             var authorized = IsAuthorized(endpoint);
-            var requiresBearer = authorized && endpoint?.Metadata.GetMetadata<BearerDocumentation>() is not null;
+            var requiresBearer = endpoint?.Metadata.GetMetadata<BearerDocumentation>() is not null && authorized;
             var context = new HubContext(hub.Path, authorized, requiresBearer,
                 SupportedProtocols(options, hub.ConnectionOptions.Transports), !options.DisableImplicitFromServicesParameters, hub.ConnectionOptions.Transports);
             foreach (var method in hub.Description.Methods)

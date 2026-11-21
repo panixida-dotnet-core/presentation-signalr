@@ -122,15 +122,16 @@ public sealed class SignalRDocumentationTests
     }
 
     [Theory(DisplayName = "Hub authorization applies to invocations and client callbacks unless the endpoint allows anonymous access")]
-    [InlineData(false, false, false, false)]
-    [InlineData(true, false, false, true)]
-    [InlineData(false, true, false, true)]
-    [InlineData(true, true, false, true)]
-    [InlineData(false, false, true, false)]
-    [InlineData(true, false, true, false)]
-    [InlineData(false, true, true, false)]
-    [InlineData(true, true, true, false)]
-    public async Task HonorsHubAuthorization(bool required, bool fallback, bool anonymous, bool expected)
+    [InlineData(false, false, false, true, false)]
+    [InlineData(true, false, false, true, true)]
+    [InlineData(true, false, false, false, true)]
+    [InlineData(false, true, false, true, true)]
+    [InlineData(true, true, false, true, true)]
+    [InlineData(false, false, true, true, false)]
+    [InlineData(true, false, true, true, false)]
+    [InlineData(false, true, true, true, false)]
+    [InlineData(true, true, true, true, false)]
+    public async Task HonorsHubAuthorization(bool required, bool fallback, bool anonymous, bool documentBearer, bool expected)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.Services.AddSignalR(builder.Configuration);
@@ -141,7 +142,11 @@ public sealed class SignalRDocumentationTests
         await using var app = builder.Build();
         app.UseSignalR(hubs =>
         {
-            var endpoint = hubs.MapHub<DocumentationHub>("/authorization").WithBearerDocumentation();
+            var endpoint = hubs.MapHub<DocumentationHub>("/authorization");
+            if (documentBearer)
+            {
+                endpoint.WithBearerDocumentation();
+            }
             if (required)
             {
                 endpoint.RequireAuthorization(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
@@ -160,7 +165,7 @@ public sealed class SignalRDocumentationTests
         operations.ShouldContain(operation => operation["action"]!.GetValue<string>() == "send" &&
             operation["bindings"]!["x-signalr"]!["target"]!.GetValue<string>() == nameof(IDocumentationClient.Changed));
         operations.ShouldAllBe(operation => operation["bindings"]!["x-signalr"]!["authorizationRequired"]!.GetValue<bool>() == expected);
-        operations.ShouldAllBe(operation => operation.AsObject().ContainsKey("security") == expected);
+        operations.ShouldAllBe(operation => operation.AsObject().ContainsKey("security") == (expected && documentBearer));
     }
 
     [Fact(DisplayName = "Undocumented hubs remain usable without requiring JSON schema metadata")]
