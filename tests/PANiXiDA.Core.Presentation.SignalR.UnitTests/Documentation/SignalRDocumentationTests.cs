@@ -72,17 +72,17 @@ public sealed class SignalRDocumentationTests
             }
         }
 
-        var read = operations.Single(operation => operation.Key.Contains("hub.read-state@", StringComparison.Ordinal)).Value!;
+        var read = operations["read-state"]!;
         read["summary"]!.GetValue<string>().ShouldBe("Reads current state.");
         read["bindings"]!["x-signalr"]!["authorizationRequired"]!.GetValue<bool>().ShouldBeTrue();
         read["reply"].ShouldNotBeNull();
-        var reply = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.read-state@/v1/state.result", StringComparison.Ordinal)).Value!;
+        var reply = FindMessage(document, "read-state.result");
         reply["title"]!.GetValue<string>().ShouldBe("Read response");
         reply["payload"]!["schema"]!["oneOf"]![0]!["properties"]!["result"]!["properties"]!["state"].ShouldNotBeNull();
         reply["payload"]!["schema"]!["oneOf"]![1]!["properties"]!["error"]!["type"]!.GetValue<string>().ShouldBe("string");
-        operations.Any(operation => operation.Key.Contains("GetUpdates", StringComparison.Ordinal)).ShouldBeFalse();
-        operations.Any(operation => operation.Key.Contains("OnConnected", StringComparison.Ordinal)).ShouldBeFalse();
-        var callback = operations.Single(operation => operation.Key.Contains("client.Changed@", StringComparison.Ordinal)).Value!;
+        operations.ContainsKey("get-updates").ShouldBeFalse();
+        operations.ContainsKey("on-connected-async").ShouldBeFalse();
+        var callback = operations["changed"]!;
         callback["action"]!.GetValue<string>().ShouldBe("send");
         callback["bindings"]!["x-signalr"]!["authorizationRequired"]!.GetValue<bool>().ShouldBeTrue();
         document["components"]!["securitySchemes"]!["Bearer"]!["scheme"]!.GetValue<string>().ShouldBe("bearer");
@@ -91,26 +91,23 @@ public sealed class SignalRDocumentationTests
             operation.Value!["security"]!.AsArray().ShouldHaveSingleItem()!["$ref"]!.GetValue<string>()
                 .ShouldBe("#/components/securitySchemes/Bearer");
         }
-        operations.Single(operation => operation.Key.Contains("hub.Watch@", StringComparison.Ordinal)).Value!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
-        operations.Single(operation => operation.Key.Contains(".upload.updates", StringComparison.Ordinal)).Value!["action"]!.GetValue<string>().ShouldBe("receive");
-        var message = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.read-state@/v1/state", StringComparison.Ordinal)).Value!;
+        operations["watch"]!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
+        operations["upload-upload-updates"]!["action"]!.GetValue<string>().ShouldBe("receive");
+        var message = FindMessage(document, "read-state");
         message["title"]!.GetValue<string>().ShouldBe("Read request");
-        var streamed = document["components"]!["messages"]!.AsObject()
-            .Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.Watch@/v1/state.result", StringComparison.Ordinal)).Value!;
+        var streamed = FindMessage(document, "watch.result");
         streamed["title"]!.GetValue<string>().ShouldBe("Watch stream");
-        var uploaded = document["components"]!["messages"]!.AsObject()
-            .Single(message => message.Value!["name"]!.GetValue<string>().EndsWith(".upload.updates", StringComparison.Ordinal)).Value!;
+        var uploaded = FindMessage(document, "upload-upload-updates");
         uploaded["title"]!.GetValue<string>().ShouldBe("Upload / updates stream");
         message["payload"]!["schema"]!["properties"]!["arguments"]!["minItems"]!.GetValue<int>().ShouldBe(1);
-        var bulk = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.Bulk@/v1/state", StringComparison.Ordinal)).Value!;
+        var bulk = FindMessage(document, "bulk");
         bulk["payload"]!["schema"]!["properties"]!["arguments"]!["minItems"]!.GetValue<int>().ShouldBe(1);
-        var uploadReply = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.Upload@/v1/state.result", StringComparison.Ordinal)).Value!;
+        var uploadReply = FindMessage(document, "upload.result");
         uploadReply["payload"]!["schema"]!["oneOf"]![0]!["properties"]!["result"]!["type"]!.GetValue<string>().ShouldBe("null");
-        operations.Single(operation => operation.Key.Contains($"hub.{nameof(IDerivedDocumentationStream.WatchDerived)}@", StringComparison.Ordinal)).Value!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
+        operations["watch-derived"]!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
         var v2 = source.Generate("matchmaking-signalr-v2", TestContext.Current.CancellationToken);
         v2["info"]!["x-deprecated"]!.GetValue<bool>().ShouldBeTrue();
-        var configured = v2["components"]!["messages"]!.AsObject().Single(message =>
-            message.Value!["name"]!.GetValue<string>().EndsWith("hub.Read@/v2/state.result", StringComparison.Ordinal)).Value!;
+        var configured = FindMessage(v2, "read.result");
         configured["payload"]!["schema"]!["oneOf"]![0]!["properties"]!["result"]!["properties"]!["state"].ShouldNotBeNull();
         await using var connection = new HubConnectionBuilder().WithUrl(address + "/v2/state").Build();
         await connection.StartAsync(TestContext.Current.CancellationToken);
@@ -297,10 +294,10 @@ public sealed class SignalRDocumentationTests
         app.UseSignalR(hubs => hubs.MapHub<DocumentationHub>("/options").AllowAnonymous());
         var source = app.Services.GetServices<IApiDocumentSource>().OfType<IAsyncApiDocumentSource>().Single();
         var document = source.Generate("matchmaking-signalr-v1", TestContext.Current.CancellationToken);
-        var read = document["operations"]!.AsObject().Single(operation => operation.Key.Contains("hub.read-state@", StringComparison.Ordinal)).Value!;
+        var read = document["operations"]!["read-state"]!;
         read["bindings"]!["x-signalr"]!["protocols"]!.AsArray().Count.ShouldBe(protocol is null ? 2 : 1);
         read["bindings"]!["x-signalr"]!["authorizationRequired"]!.GetValue<bool>().ShouldBeFalse();
-        var message = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.read-state@/options", StringComparison.Ordinal)).Value!;
+        var message = FindMessage(document, "read-state");
         message["payload"]!["schema"]!["properties"]!["arguments"]!["minItems"]!.GetValue<int>().ShouldBe(disableImplicitServices ? 2 : 1);
     }
 
@@ -353,6 +350,10 @@ public sealed class SignalRDocumentationTests
             ? null
             : services.GetService(serviceType);
     }
+    private static JsonNode FindMessage(JsonNode document, string name) =>
+        document["components"]!["messages"]!.AsObject().Select(entry => entry.Value!)
+            .Single(message => message["name"]!.GetValue<string>() == name);
+
     public sealed class PlainHub : Hub;
 }
 

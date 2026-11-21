@@ -380,13 +380,15 @@ public sealed class MatchmakingHub : Hub, IDocumentedHubEndpoint
 public sealed record SearchState(Guid SearchId);
 ```
 
-`Name` identifies the module; `Summary` supplies its display title. `ApiVersion` comes from `Asp.Versioning.Abstractions`. `IsDeprecated` defaults to false. Existing `IHubEndpoint` implementations remain valid without documentation.
+`Name` identifies the module. `Summary` supplies the channel title and the document title with a version label such as `v1`. `info.version` contains the full contract version from `ApiVersion`. `ApiVersion` comes from `Asp.Versioning.Abstractions`. `IsDeprecated` defaults to false. Existing `IHubEndpoint` implementations remain valid without documentation.
 
 Operation names and summaries are resolved independently, in this order: Map builder overrides, `Operations`, standard `EndpointName`/`EndpointSummary` attributes, XML summary and CLR method name. `Operations` defaults to empty. Null summaries inherit lower-priority descriptions; an empty string clears them. Entries use CLR method names through `nameof`, even when `HubMethodName` changes the wire target. Display names never change client calls or stable document IDs.
 
 Messages and replies use the resolved operation name for display titles: `GetState request`, `GetState response`, `Watch stream`, `Upload / updates stream`, or `Changed notification`. Typed callbacks returning a value use request/response titles. Technical message names, component keys, references, and payload schemas stay unchanged.
 
 Each mapped hub path has one channel shared by invocations, callbacks, streams, and replies. Replies stay under their operation's `Replies` section. Multiple hubs with the same `Name`, `Summary`, and `ApiVersion` share a document; different paths remain separate channels and different modules or versions remain separate documents.
+
+Operation keys use short names derived from the SignalR targets, such as `state-changed-async`. Repeated keys receive a numeric suffix within the document. The documented target keeps its exact SignalR name.
 
 Typed callbacks use `client.MethodName` keys in `Operations` and `WithClientOperation(nameof(IClient.MethodName), name: ..., summary: ...)` in Map. Unknown method/callback names fail explicitly. Dictionaries are snapshotted per hub; builder overrides belong to the mapped path.
 
