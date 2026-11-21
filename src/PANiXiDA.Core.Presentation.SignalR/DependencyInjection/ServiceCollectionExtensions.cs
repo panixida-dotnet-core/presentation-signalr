@@ -51,6 +51,8 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(messagePackTypes);
         services.TryAddSingleton<MappedHubDocumentation>();
+        services.AddOptions<SignalRDocumentationOptions>()
+            .Bind(configuration.GetSection(SignalRDocumentationOptions.SectionName));
         services.AddApiDocumentSource<SignalRDocumentSource>();
         var builder = services.AddSignalR().AddJsonConfiguration()
             .AddMessagePackConfiguration(messagePackTypes, messagePackSerializer);

@@ -370,7 +370,6 @@ public sealed class MatchmakingHub : Hub, IDocumentedHubEndpoint
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) =>
         hubs.MapHub<MatchmakingHub>("/hubs/v1/matchmaking")
             .RequireAuthorization()
-            .WithBearerDocumentation()
             .WithOperation(nameof(GetState), summary: "Returns the current search state.");
 
     [EndpointName("ReadSearchState")]
@@ -415,7 +414,7 @@ Pass an application-owned source-generated context to `AddApiDocumentation(confi
 
 For typed client callbacks, `authorizationRequired` reflects the hub endpoint's authorization requirement, including the fallback policy and `AllowAnonymous` metadata. Hub method operations also account for method-level authorization.
 
-For an endpoint secured by a bearer policy, use `WithBearerDocumentation()` to add a Bearer security scheme to AsyncAPI and reference it from the hub's operations and callbacks. This convention describes credentials for clients such as Scalar. Configure the actual authentication handler and authorization policy in the host.
+AsyncAPI derives Bearer from the hub endpoint's effective ASP.NET Core authorization policy. Policy scheme names take precedence, and policies without explicit schemes use the application's default authenticate scheme. The built-in Bearer and OpenIddict validation scheme names are recognized. List additional Bearer scheme names in `ScalarConfiguration:BearerAuthenticationSchemes`, which is also used by OpenAPI. `AllowAnonymous` suppresses the requirement. `WithBearerDocumentation()` remains available for applications that explicitly document Bearer on an authorized hub.
 
 `x-signalr` contains the SignalR metadata consumed by the console. Its `transports` field lists the allowed transports; no separate `transportProtocol` marker is emitted.
 
