@@ -33,7 +33,7 @@ public sealed class OperationMetadataTests
 
         document["info"]!["title"]!.GetValue<string>().ShouldBe("Metadata SignalR v1");
         document["info"]!["version"]!.GetValue<string>().ShouldBe("1.0");
-        document["channels"]!["/metadata"]!["title"]!.GetValue<string>().ShouldBe(MetadataHub.Summary);
+        document["channels"]!["metadata"]!["title"]!.GetValue<string>().ShouldBe("Metadata");
         document["operations"]!["wire-read"].ShouldNotBeNull();
         var read = Operation(document, "/metadata", "wire-read");
         read["title"]!.GetValue<string>().ShouldBe("ContractRead");
@@ -75,9 +75,9 @@ public sealed class OperationMetadataTests
         var document = source.Generate("metadata-signalr-v1", TestContext.Current.CancellationToken);
 
         source.GetDocuments().Select(item => item.Name).Order().ShouldBe(["matchmaking-signalr-v2", "metadata-signalr-v1"]);
-        document["channels"]!.AsObject().Select(channel => channel.Key).Order().ShouldBe(["/metadata", "/secondary"]);
+        document["channels"]!.AsObject().Select(channel => channel.Key).Order().ShouldBe(["metadata", "secondary"]);
         document["operations"]!.AsObject().Count.ShouldBe(11);
-        document["operations"]!.AsObject().Where(operation => HasChannel(operation.Value!, "/metadata"))
+        document["operations"]!.AsObject().Where(operation => HasChannel(document, operation.Value!, "/metadata"))
             .Select(operation => operation.Value!["bindings"]!["x-signalr"]!["target"]!.GetValue<string>()).Order()
             .ShouldBe(MetadataTargets.Order());
         foreach (var entry in document["operations"]!.AsObject())
@@ -95,8 +95,8 @@ public sealed class OperationMetadataTests
         }
 
         var other = source.Generate("matchmaking-signalr-v2", TestContext.Current.CancellationToken);
-        other["channels"]!.AsObject().Select(channel => channel.Key).ShouldBe(["/other"]);
-        document["operations"]!.AsObject().Any(operation => HasChannel(operation.Value!, "/other")).ShouldBeFalse();
+        other["channels"]!.AsObject().Select(channel => channel.Key).ShouldBe(["other"]);
+        document["operations"]!.AsObject().Any(operation => HasChannel(document, operation.Value!, "/other")).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Operation IDs are unique and deterministic when two mapped hubs use the same target")]
@@ -109,10 +109,34 @@ public sealed class OperationMetadataTests
             hubs.MapHub<MetadataHub>("/first");
         });
 
-        var operations = Generate(app)["operations"]!;
+        var document = Generate(app);
+        var operations = document["operations"]!;
 
-        HasChannel(operations["wire-read"]!, "/first").ShouldBeTrue();
-        HasChannel(operations["wire-read-2"]!, "/second").ShouldBeTrue();
+        HasChannel(document, operations["wire-read"]!, "/first").ShouldBeTrue();
+        HasChannel(document, operations["wire-read-2"]!, "/second").ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Versioned routes yield readable unique channel keys and retain their connection addresses")]
+    public async Task VersionedRoutesProduceUniqueChannelKeys()
+    {
+        const string FirstAddress = "/api/v1/game-sessions/state";
+        const string SecondAddress = "/api/v2.1/game-sessions/state";
+        await using var app = CreateApplication();
+        app.UseSignalR(hubs =>
+        {
+            hubs.MapHub<MetadataHub>(SecondAddress);
+            hubs.MapHub<MetadataHub>(FirstAddress);
+        });
+
+        var document = Generate(app);
+
+        var channels = document["channels"]!.AsObject();
+        channels["game-sessions-state"]!["address"]!.GetValue<string>().ShouldBe(FirstAddress);
+        channels["game-sessions-state-2"]!["address"]!.GetValue<string>().ShouldBe(SecondAddress);
+        Operation(document, FirstAddress, "wire-read")["channel"]!["$ref"]!.GetValue<string>()
+            .ShouldBe("#/channels/game-sessions-state");
+        Operation(document, SecondAddress, "wire-read")["channel"]!["$ref"]!.GetValue<string>()
+            .ShouldBe("#/channels/game-sessions-state-2");
     }
 
     [Fact(DisplayName = "Targets without ASCII slug characters use a fallback operation ID and keep the wire name")]
@@ -306,13 +330,16 @@ public sealed class OperationMetadataTests
 
     private static JsonNode Operation(JsonObject document, string path, string target, bool client = false) =>
         document["operations"]!.AsObject().Single(operation =>
-            HasChannel(operation.Value!, path) &&
+            HasChannel(document, operation.Value!, path) &&
             operation.Value!["bindings"]!["x-signalr"]!["target"]!.GetValue<string>() == target &&
             operation.Value["action"]!.GetValue<string>() == (client ? "send" : "receive")).Value!;
 
-    private static bool HasChannel(JsonNode operation, string path) =>
-        operation["channel"]!["$ref"]!.GetValue<string>() == "#/channels/" +
-            path.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal);
+    private static bool HasChannel(JsonObject document, JsonNode operation, string path)
+    {
+        var reference = operation["channel"]!["$ref"]!.GetValue<string>();
+        var key = reference["#/channels/".Length..];
+        return document["channels"]![key]!["address"]!.GetValue<string>() == path;
+    }
 
     private static JsonNode Message(JsonObject document, JsonNode operation, bool reply = false)
     {

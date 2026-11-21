@@ -58,17 +58,20 @@ public sealed class SignalRDocumentationTests
         var document = JsonNode.Parse(await client.GetStringAsync("/contract", TestContext.Current.CancellationToken))!;
         source.GetDocuments().Select(document => document.Name).Order().ShouldBe(["matchmaking-signalr-v1", "matchmaking-signalr-v2"]);
         document["info"]!["version"]!.GetValue<string>().ShouldBe("1.0");
-        document["channels"]!.AsObject().Count.ShouldBe(1);
-        document["channels"]!["/v1/state"].ShouldNotBeNull();
-        document["channels"]!["/v2/state"].ShouldBeNull();
+        var channel = document["channels"]!.AsObject().ShouldHaveSingleItem();
+        channel.Key.ShouldBe("state");
+        channel.Value!["address"]!.GetValue<string>().ShouldBe("/v1/state");
+        channel.Value["title"]!.GetValue<string>().ShouldBe(DocumentationHub.Summary);
         var operations = document["operations"]!.AsObject();
         foreach (var operation in operations.Select(operation => operation.Value!))
         {
-            operation["channel"]!["$ref"]!.GetValue<string>().ShouldBe("#/channels/~1v1~1state");
+            operation["channel"]!["$ref"]!.GetValue<string>().ShouldBe("#/channels/state");
+            AssertChannelMessage(channel.Value, operation);
             operation["bindings"]!["x-signalr"]!.AsObject().ContainsKey("transportProtocol").ShouldBeFalse();
             if (operation["reply"] is { } completion)
             {
                 JsonNode.DeepEquals(operation["channel"], completion["channel"]).ShouldBeTrue();
+                AssertChannelMessage(channel.Value, completion);
             }
         }
 
@@ -353,6 +356,14 @@ public sealed class SignalRDocumentationTests
     private static JsonNode FindMessage(JsonNode document, string name) =>
         document["components"]!["messages"]!.AsObject().Select(entry => entry.Value!)
             .Single(message => message["name"]!.GetValue<string>() == name);
+
+    private static void AssertChannelMessage(JsonNode channel, JsonNode operation)
+    {
+        var reference = operation["messages"]!.AsArray().ShouldHaveSingleItem()!["$ref"]!.GetValue<string>();
+        const string Prefix = "#/channels/state/messages/";
+        reference.ShouldStartWith(Prefix);
+        channel["messages"]![reference[Prefix.Length..]].ShouldNotBeNull();
+    }
 
     public sealed class PlainHub : Hub;
 }

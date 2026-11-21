@@ -44,7 +44,13 @@ public static class HubDocumentationRegistry
         var prefix = $"{module}-{Transport}-";
         var document = new ApiDocumentDescriptor(documentName, $"{summary} {documentName[prefix.Length..]}",
             module, text, ApiDocumentFormat.AsyncApi, deprecated: THub.IsDeprecated);
-        RegisterCore<THub>(document, THub.Operations, methods, summary);
+        var channelTitle = summary.Trim();
+        const string TransportSuffix = " SignalR";
+        if (channelTitle.EndsWith(TransportSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            channelTitle = channelTitle[..^TransportSuffix.Length].TrimEnd();
+        }
+        RegisterCore<THub>(document, THub.Operations, methods, channelTitle);
     }
 
     /// <summary>Registers a documented hub. Intended for generated module initializers.</summary>
@@ -58,7 +64,7 @@ public static class HubDocumentationRegistry
     }
 
     private static void RegisterCore<THub>(ApiDocumentDescriptor document,
-        IReadOnlyDictionary<string, ApiOperationMetadata> operations, HubMethodDescription[] methods, string? summary = null)
+        IReadOnlyDictionary<string, ApiOperationMetadata> operations, HubMethodDescription[] methods, string? channelTitle = null)
         where THub : Hub
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -80,7 +86,7 @@ public static class HubDocumentationRegistry
             services => services.GetRequiredService<IOptions<HubOptions<THub>>>().Value,
             operations.ToFrozenDictionary(StringComparer.Ordinal))
         {
-            Summary = summary
+            ChannelTitle = channelTitle
         });
     }
 
@@ -90,7 +96,7 @@ public static class HubDocumentationRegistry
 internal sealed record HubDescription(ApiDocumentDescriptor Document, IReadOnlyList<HubMethodDescription> Methods,
     Func<IServiceProvider, HubOptions> Options, IReadOnlyDictionary<string, ApiOperationMetadata> Operations)
 {
-    internal string? Summary { get; init; }
+    internal string? ChannelTitle { get; init; }
 }
 
 internal sealed class MappedHubDocumentation
