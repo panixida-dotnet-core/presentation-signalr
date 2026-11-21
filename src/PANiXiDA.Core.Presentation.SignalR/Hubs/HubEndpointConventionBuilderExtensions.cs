@@ -2,9 +2,20 @@ using Microsoft.AspNetCore.Builder;
 
 namespace PANiXiDA.Core.Presentation.SignalR.Hubs;
 
-/// <summary>Overrides operation documentation for a particular mapped hub endpoint.</summary>
+/// <summary>Configures documentation for a particular mapped hub endpoint.</summary>
 public static class HubEndpointConventionBuilderExtensions
 {
+    /// <summary>Describes bearer authentication in AsyncAPI for a hub secured by a bearer policy.</summary>
+    /// <param name="builder">The mapped hub conventions.</param>
+    /// <returns>The original convention builder.</returns>
+    /// <remarks>Configure the authentication handler and authorization policy separately.</remarks>
+    public static HubEndpointConventionBuilder WithBearerDocumentation(this HubEndpointConventionBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        builder.Add(endpoint => endpoint.Metadata.Add(BearerDocumentation.Instance));
+        return builder;
+    }
+
     /// <summary>Overrides a hub method's display name or summary without changing its SignalR target.</summary>
     /// <param name="builder">The mapped hub conventions.</param>
     /// <param name="methodName">The CLR method name, normally supplied through <c>nameof</c>.</param>
@@ -50,3 +61,12 @@ public static class HubEndpointConventionBuilderExtensions
 }
 
 internal sealed record HubOperationOverride(string MemberName, string? Name, string? Summary, bool IsClientMethod);
+
+internal sealed class BearerDocumentation
+{
+    internal static BearerDocumentation Instance { get; } = new();
+
+    private BearerDocumentation()
+    {
+    }
+}

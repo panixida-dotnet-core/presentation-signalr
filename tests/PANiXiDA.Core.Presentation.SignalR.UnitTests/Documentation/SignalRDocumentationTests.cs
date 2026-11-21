@@ -81,6 +81,12 @@ public sealed class SignalRDocumentationTests
         var callback = operations.Single(operation => operation.Key.Contains("client.Changed@", StringComparison.Ordinal)).Value!;
         callback["action"]!.GetValue<string>().ShouldBe("send");
         callback["bindings"]!["x-signalr"]!["authorizationRequired"]!.GetValue<bool>().ShouldBeTrue();
+        document["components"]!["securitySchemes"]!["Bearer"]!["scheme"]!.GetValue<string>().ShouldBe("bearer");
+        foreach (var operation in operations)
+        {
+            operation.Value!["security"]!.AsArray().ShouldHaveSingleItem()!["$ref"]!.GetValue<string>()
+                .ShouldBe("#/components/securitySchemes/Bearer");
+        }
         operations.Single(operation => operation.Key.Contains("hub.Watch@", StringComparison.Ordinal)).Value!["bindings"]!["x-signalr"]!["streamResult"]!.GetValue<bool>().ShouldBeTrue();
         operations.Single(operation => operation.Key.Contains(".upload.updates", StringComparison.Ordinal)).Value!["action"]!.GetValue<string>().ShouldBe("receive");
         var message = document["components"]!["messages"]!.AsObject().Single(message => message.Value!["name"]!.GetValue<string>().EndsWith("hub.read-state@/v1/state", StringComparison.Ordinal)).Value!;
@@ -135,10 +141,10 @@ public sealed class SignalRDocumentationTests
         await using var app = builder.Build();
         app.UseSignalR(hubs =>
         {
-            var endpoint = hubs.MapHub<DocumentationHub>("/authorization");
+            var endpoint = hubs.MapHub<DocumentationHub>("/authorization").WithBearerDocumentation();
             if (required)
             {
-                endpoint.RequireAuthorization();
+                endpoint.RequireAuthorization(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
             }
 
             if (anonymous)
@@ -154,6 +160,7 @@ public sealed class SignalRDocumentationTests
         operations.ShouldContain(operation => operation["action"]!.GetValue<string>() == "send" &&
             operation["bindings"]!["x-signalr"]!["target"]!.GetValue<string>() == nameof(IDocumentationClient.Changed));
         operations.ShouldAllBe(operation => operation["bindings"]!["x-signalr"]!["authorizationRequired"]!.GetValue<bool>() == expected);
+        operations.ShouldAllBe(operation => operation.AsObject().ContainsKey("security") == expected);
     }
 
     [Fact(DisplayName = "Undocumented hubs remain usable without requiring JSON schema metadata")]
@@ -295,7 +302,8 @@ public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHub
 
     public static ApiVersion ApiVersion => new(1, 0);
 
-    public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<DocumentationHub>("/v1/state").RequireAuthorization();
+    public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) =>
+        hubs.MapHub<DocumentationHub>("/v1/state").RequireAuthorization().WithBearerDocumentation();
 
     /// <summary>Reads current state.</summary>
     [HubMethodName("read-state")]
