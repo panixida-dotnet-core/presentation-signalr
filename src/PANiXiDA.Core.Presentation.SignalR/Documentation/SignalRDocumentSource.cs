@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -109,9 +110,11 @@ internal sealed partial class SignalRDocumentSource(
         var slug = NonSlugCharacters().Replace(JsonNamingPolicy.KebabCaseLower.ConvertName(target), "-").Trim('-');
         var prefix = slug.Length == 0 ? "operation" : slug[..Math.Min(slug.Length, 230)].TrimEnd('-');
         var id = prefix;
-        for (var suffix = 2; !operationIds.Add(id); suffix++)
+        var suffix = 2;
+        while (!operationIds.Add(id))
         {
-            id = FormattableString.Invariant($"{prefix}-{suffix}");
+            id = string.Create(CultureInfo.InvariantCulture, $"{prefix}-{suffix}");
+            suffix++;
         }
         return id;
     }
