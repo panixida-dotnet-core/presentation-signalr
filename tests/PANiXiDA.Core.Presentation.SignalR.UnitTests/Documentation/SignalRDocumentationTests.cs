@@ -5,6 +5,7 @@ using System.Threading.Channels;
 
 using Asp.Versioning;
 
+using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -17,6 +18,7 @@ using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 using PANiXiDA.Core.ApiDocumentation;
 using PANiXiDA.Core.ApiDocumentation.DependencyInjection;
@@ -35,6 +37,8 @@ public sealed class SignalRDocumentationTests
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSignalR(builder.Configuration);
+        builder.Services.AddAuthentication("OpenIddict.Validation.AspNetCore")
+            .AddBearerToken("OpenIddict.Validation.AspNetCore");
         builder.Services.AddAuthorization();
         builder.Services.AddSingleton<DocumentationDependency>();
         await using var app = builder.Build();
@@ -178,6 +182,66 @@ public sealed class SignalRDocumentationTests
         app.Services.GetRequiredService<ApiDocumentCatalog>().GetDocuments().ShouldBeEmpty();
     }
 
+    [Theory(DisplayName = "AsyncAPI uses the hub policy schemes before the default authentication scheme")]
+    [InlineData("Cookies", "Bearer", false, false, true)]
+    [InlineData("Bearer", "Cookies", false, false, false)]
+    [InlineData("Bearer", null, true, false, true)]
+    [InlineData("Bearer", null, false, true, false)]
+    [InlineData(null, null, false, false, false)]
+    [InlineData("Cookies", null, false, false, false)]
+    [InlineData("CustomToken", null, false, false, true)]
+    [InlineData(BearerTokenDefaults.AuthenticationScheme, null, false, false, true)]
+    public async Task DocumentsBearerFromEffectivePolicy(string? defaultScheme, string? policyScheme, bool fallback,
+        bool anonymous, bool bearer)
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Configuration["ScalarConfiguration:BearerAuthenticationSchemes:0"] = "CustomToken";
+        builder.Services.AddSignalR(builder.Configuration);
+        builder.Services.AddAuthentication(options => options.DefaultAuthenticateScheme = defaultScheme)
+            .AddCookie()
+            .AddBearerToken("Bearer")
+            .AddBearerToken()
+            .AddBearerToken("CustomToken");
+        var authorization = builder.Services.AddAuthorizationBuilder();
+        var policy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser();
+        if (policyScheme is not null)
+        {
+            authorization.AddPolicy("HubPolicy", policy.AddAuthenticationSchemes(policyScheme).Build());
+        }
+        if (fallback)
+        {
+            authorization.SetFallbackPolicy(policy.Build());
+        }
+        builder.Services.AddSingleton<DocumentationDependency>();
+        builder.Services.AddApiDocumentationSchemas(DocumentationJsonContext.Default);
+        await using var app = builder.Build();
+        app.UseSignalR(hubs =>
+        {
+            var hub = hubs.MapHub<DocumentationHub>("/automatic");
+            if (policyScheme is not null)
+            {
+                hub.RequireAuthorization("HubPolicy");
+            }
+            else if (!fallback)
+            {
+                hub.RequireAuthorization();
+            }
+            if (anonymous)
+            {
+                hub.AllowAnonymous();
+            }
+        });
+
+        var source = app.Services.GetServices<IApiDocumentSource>().OfType<IAsyncApiDocumentSource>().Single();
+        var document = source.Generate("matchmaking-signalr-v1", TestContext.Current.CancellationToken);
+
+        document["components"]!.AsObject().ContainsKey("securitySchemes").ShouldBe(bearer);
+        var operations = document["operations"]!.AsObject().Select(operation => operation.Value!.AsObject()).ToArray();
+        operations.ShouldNotBeEmpty();
+        operations.ShouldAllBe(operation => operation.ContainsKey("security") == bearer);
+        operations.ShouldAllBe(operation => operation["bindings"]!["x-signalr"]!["authorizationRequired"]!.GetValue<bool>() != anonymous);
+    }
+
     [Fact(DisplayName = "Generated metadata validates required arguments and keeps caller arrays immutable")]
     public void ValidatesMetadata()
     {
@@ -251,7 +315,7 @@ public sealed class SignalRDocumentationTests
         mappings.Hubs.Add(new(typeof(PlainHub), "/plain", new HubDescription(descriptor,
             [new HubMethodDescription("Read", [new HubParameterDescription("id", typeof(Guid))])], _ => new HubOptions(), new Dictionary<string, ApiOperationMetadata>()), new()));
         var source = new SignalRDocumentSource(mappings, new ApiSchemaRegistry([DocumentationJsonContext.Default]),
-            new NonIntrospectingProvider(app.Services));
+            new NonIntrospectingProvider(app.Services), Options.Create(new SignalRDocumentationOptions()));
         source.Generate(descriptor.Name, TestContext.Current.CancellationToken)["operations"]!.AsObject().Count.ShouldBe(1);
     }
 
@@ -308,7 +372,7 @@ public sealed class DocumentationHub : Hub<IDocumentationClient>, IDocumentedHub
     public static ApiVersion ApiVersion => new(1, 0);
 
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) =>
-        hubs.MapHub<DocumentationHub>("/v1/state").RequireAuthorization().WithBearerDocumentation();
+        hubs.MapHub<DocumentationHub>("/v1/state").RequireAuthorization();
 
     /// <summary>Reads current state.</summary>
     [HubMethodName("read-state")]

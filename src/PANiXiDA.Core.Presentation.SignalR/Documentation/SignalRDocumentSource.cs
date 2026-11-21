@@ -1,6 +1,8 @@
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Connections;
@@ -18,7 +20,8 @@ using PANiXiDA.Core.Presentation.SignalR.Hubs;
 namespace PANiXiDA.Core.Presentation.SignalR.Documentation;
 
 internal sealed class SignalRDocumentSource(
-    MappedHubDocumentation mappings, ApiSchemaRegistry schemas, IServiceProvider services) : IAsyncApiDocumentSource
+    MappedHubDocumentation mappings, ApiSchemaRegistry schemas, IServiceProvider services,
+    IOptions<SignalRDocumentationOptions> documentationOptions) : IAsyncApiDocumentSource
 {
     private const string InvocationId = "invocationId";
     private const string Target = "target";
@@ -45,6 +48,11 @@ internal sealed class SignalRDocumentSource(
 
     public JsonObject Generate(string documentName, CancellationToken cancellationToken = default)
     {
+        return GenerateDocumentAsync(documentName, cancellationToken).GetAwaiter().GetResult();
+    }
+
+    private async Task<JsonObject> GenerateDocumentAsync(string documentName, CancellationToken cancellationToken)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(documentName);
         cancellationToken.ThrowIfCancellationRequested();
         var descriptor = GetDocuments().SingleOrDefault(document => document.Name == documentName)
@@ -62,8 +70,8 @@ internal sealed class SignalRDocumentSource(
                 candidate.Metadata.GetMetadata<HubMetadata>()?.HubType == hub.HubType && candidate.RoutePattern.RawText == hub.Path);
             var overrides = endpoint?.Metadata.GetOrderedMetadata<HubOperationOverride>() ?? [];
             ValidateOverrides(hub.Description, overrides);
-            var authorized = IsAuthorized(endpoint);
-            var requiresBearer = endpoint?.Metadata.GetMetadata<BearerDocumentation>() is not null && authorized;
+            var (authorized, requiresBearer) = await ResolveAuthorizationAsync(endpoint).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             var context = new HubContext(hub.Path, authorized, requiresBearer,
                 SupportedProtocols(options, hub.ConnectionOptions.Transports), !options.DisableImplicitFromServicesParameters, hub.ConnectionOptions.Transports);
             foreach (var method in hub.Description.Methods)
@@ -79,12 +87,48 @@ internal sealed class SignalRDocumentSource(
         return AsyncApiDocumentBuilder.Build(descriptor, operations);
     }
 
-    private bool IsAuthorized(Endpoint? endpoint)
+    private async Task<(bool Authorized, bool RequiresBearer)> ResolveAuthorizationAsync(Endpoint? endpoint)
     {
-        return endpoint?.Metadata.GetMetadata<IAllowAnonymous>() is null &&
-            (endpoint?.Metadata.GetMetadata<IAuthorizeData>() is not null ||
-                endpoint?.Metadata.GetMetadata<AuthorizationPolicy>() is not null ||
-                services.GetRequiredService<IOptions<AuthorizationOptions>>().Value.FallbackPolicy is not null);
+        var metadata = endpoint?.Metadata ?? EndpointMetadataCollection.Empty;
+        if (metadata.GetMetadata<IAllowAnonymous>() is not null)
+        {
+            return (false, false);
+        }
+
+        var provider = services.GetRequiredService<IAuthorizationPolicyProvider>();
+        var policy = await AuthorizationPolicy.CombineAsync(provider, metadata.GetOrderedMetadata<IAuthorizeData>(),
+            metadata.GetOrderedMetadata<AuthorizationPolicy>()).ConfigureAwait(false);
+        if (policy is null)
+        {
+            return (false, false);
+        }
+
+        var bearer = metadata.GetMetadata<BearerDocumentation>() is not null ||
+            await AcceptsBearerAsync(policy).ConfigureAwait(false);
+        return (true, bearer);
+    }
+
+    private async Task<bool> AcceptsBearerAsync(AuthorizationPolicy policy)
+    {
+        if (policy.AuthenticationSchemes.Count > 0)
+        {
+            return policy.AuthenticationSchemes.Any(IsBearerScheme);
+        }
+
+        var provider = services.GetService<IAuthenticationSchemeProvider>();
+        if (provider is null)
+        {
+            return false;
+        }
+
+        var scheme = await provider.GetDefaultAuthenticateSchemeAsync().ConfigureAwait(false);
+        return scheme is not null && IsBearerScheme(scheme.Name);
+    }
+
+    private bool IsBearerScheme(string name)
+    {
+        return name is "Bearer" or BearerTokenDefaults.AuthenticationScheme or "OpenIddict.Validation.AspNetCore" ||
+            documentationOptions.Value.BearerAuthenticationSchemes.Contains(name, StringComparer.Ordinal);
     }
 
     private static void ValidateOverrides(HubDescription hub, IReadOnlyList<HubOperationOverride> overrides)
