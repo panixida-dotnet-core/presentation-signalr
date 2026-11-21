@@ -62,7 +62,9 @@ internal sealed class SignalRDocumentSource(
                 candidate.Metadata.GetMetadata<HubMetadata>()?.HubType == hub.HubType && candidate.RoutePattern.RawText == hub.Path);
             var overrides = endpoint?.Metadata.GetOrderedMetadata<HubOperationOverride>() ?? [];
             ValidateOverrides(hub.Description, overrides);
-            var context = new HubContext(hub.Path, IsAuthorized(endpoint),
+            var authorized = IsAuthorized(endpoint);
+            var requiresBearer = endpoint?.Metadata.GetMetadata<BearerDocumentation>() is not null && authorized;
+            var context = new HubContext(hub.Path, authorized, requiresBearer,
                 SupportedProtocols(options, hub.ConnectionOptions.Transports), !options.DisableImplicitFromServicesParameters, hub.ConnectionOptions.Transports);
             foreach (var method in hub.Description.Methods)
             {
@@ -81,6 +83,7 @@ internal sealed class SignalRDocumentSource(
     {
         return endpoint?.Metadata.GetMetadata<IAllowAnonymous>() is null &&
             (endpoint?.Metadata.GetMetadata<IAuthorizeData>() is not null ||
+                endpoint?.Metadata.GetMetadata<AuthorizationPolicy>() is not null ||
                 services.GetRequiredService<IOptions<AuthorizationOptions>>().Value.FallbackPolicy is not null);
     }
 
@@ -136,6 +139,7 @@ internal sealed class SignalRDocumentSource(
                 }, context.WireProtocol)
             {
                 Name = documentation.Name + " / " + parameter.Name,
+                RequiresBearer = context.RequiresBearer,
                 Bindings = new JsonObject
                 {
                     ["x-signalr"] = new JsonObject
@@ -174,6 +178,7 @@ internal sealed class SignalRDocumentSource(
             message, context.WireProtocol, documentation.Summary)
         {
             Name = documentation.Name,
+            RequiresBearer = context.RequiresBearer,
             Bindings = new JsonObject { ["x-signalr"] = binding },
             Reply = !method.IsClientMethod || method.ResultType is not null
                 ? new AsyncApiMessage(id + ".result", CreateReplySchema(method.ResultType, method.ResultSchema, method.IsStream))
@@ -332,7 +337,8 @@ internal sealed class SignalRDocumentSource(
             .Select(transport => (JsonNode?)JsonValue.Create(transport.ToString()))]);
     }
 
-    private sealed record HubContext(string Path, bool Authorized, JsonArray Protocols, bool ImplicitServices, HttpTransportType Transports)
+    private sealed record HubContext(string Path, bool Authorized, bool RequiresBearer, JsonArray Protocols,
+        bool ImplicitServices, HttpTransportType Transports)
     {
         internal string WireProtocol => (Transports & HttpTransportType.WebSockets) != 0 ? "ws" : "http";
     }

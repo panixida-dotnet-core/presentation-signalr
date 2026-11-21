@@ -370,6 +370,7 @@ public sealed class MatchmakingHub : Hub, IDocumentedHubEndpoint
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) =>
         hubs.MapHub<MatchmakingHub>("/hubs/v1/matchmaking")
             .RequireAuthorization()
+            .WithBearerDocumentation()
             .WithOperation(nameof(GetState), summary: "Returns the current search state.");
 
     [EndpointName("ReadSearchState")]
@@ -413,6 +414,8 @@ Pass an application-owned source-generated context to `AddApiDocumentation(confi
 `/asyncapi/matchmaking-signalr-v1.json` contains actual paths, arguments, replies, callbacks and streams. `x-signalr` bindings report targets, protocols, mapped transports and authorization, including the fallback policy configured in `AuthorizationOptions`. JSON envelopes contain generated payload schemas. Completion errors remain strings. MessagePack uses its binary protocol encoding. Untyped `Clients.SendAsync` calls require a custom document source because their runtime target strings cannot be inferred reliably.
 
 For typed client callbacks, `authorizationRequired` reflects the hub endpoint's authorization requirement, including the fallback policy and `AllowAnonymous` metadata. Hub method operations also account for method-level authorization.
+
+For an endpoint secured by a bearer policy, use `WithBearerDocumentation()` to add a Bearer security scheme to AsyncAPI and reference it from the hub's operations and callbacks. This convention describes credentials for clients such as Scalar. Configure the actual authentication handler and authorization policy in the host.
 
 `x-signalr` contains the SignalR metadata consumed by the console. Its `transports` field lists the allowed transports; no separate `transportProtocol` marker is emitted.
 
