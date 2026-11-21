@@ -62,7 +62,8 @@ internal sealed partial class SignalRDocumentSource(
             ?? throw new ArgumentException($"SignalR document '{documentName}' was not found.", nameof(documentName));
         var operations = new List<AsyncApiOperation>();
         var operationIds = new HashSet<string>(StringComparer.Ordinal);
-        var titles = new Dictionary<string, string>(StringComparer.Ordinal);
+        var channelKeys = new HashSet<string>(StringComparer.Ordinal);
+        var channels = new Dictionary<string, MappedHubDescription>(StringComparer.Ordinal);
         var serviceTypes = services.GetService<IServiceProviderIsService>();
         var endpoints = services.GetService<IHostApplicationLifetime>()?.ApplicationStarted.IsCancellationRequested == true
             ? services.GetRequiredService<EndpointDataSource>().Endpoints
@@ -78,40 +79,47 @@ internal sealed partial class SignalRDocumentSource(
             ValidateOverrides(hub.Description, overrides);
             var (authorized, requiresBearer) = await ResolveAuthorizationAsync(endpoint).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            var context = new HubContext(hub.Path, authorized, requiresBearer,
+            var channelKey = ReserveKey(channelKeys, VersionedRoutePrefix().Replace(hub.Path, ""), "channel");
+            channels.Add(channelKey, hub);
+            var context = new HubContext(channelKey, authorized, requiresBearer,
                 SupportedProtocols(options, hub.ConnectionOptions.Transports), !options.DisableImplicitFromServicesParameters, hub.ConnectionOptions.Transports);
-            if (hub.Description.Summary is { } summary)
-            {
-                titles.Add(hub.Path, summary);
-            }
             foreach (var method in hub.Description.Methods)
             {
                 var parameters = method.Parameters.Where(parameter => IsSerialized(parameter, method, context, serviceTypes)).ToArray();
-                var id = ReserveOperationId(operationIds, method.Name);
+                var id = ReserveKey(operationIds, method.Name, "operation");
                 var documentation = ResolveMetadata(hub.Description, method, overrides);
                 operations.AddRange(CreateUploads(operationIds, id, context, method, parameters, documentation));
                 operations.Add(CreateInvocation(id, context, method, parameters, documentation));
             }
         }
 
+        return BuildDocument(descriptor, operations, channels);
+    }
+
+    private static JsonObject BuildDocument(ApiDocumentDescriptor descriptor, IEnumerable<AsyncApiOperation> operations,
+        IReadOnlyDictionary<string, MappedHubDescription> channels)
+    {
         var document = AsyncApiDocumentBuilder.Build(descriptor, operations);
-        foreach (var (address, channel) in document["channels"]!.AsObject())
+        foreach (var (key, channel) in document["channels"]!.AsObject())
         {
-            if (titles.TryGetValue(address, out var title))
+            var hub = channels[key];
+            // The shared builder uses the supplied address as the key when creating channel references.
+            channel!["address"] = hub.Path;
+            if (hub.Description.ChannelTitle is { } title)
             {
-                channel!["title"] = title;
+                channel["title"] = title;
             }
         }
         return document;
     }
 
-    private static string ReserveOperationId(HashSet<string> operationIds, string target)
+    private static string ReserveKey(HashSet<string> reservedKeys, string name, string fallback)
     {
-        var slug = NonSlugCharacters().Replace(JsonNamingPolicy.KebabCaseLower.ConvertName(target), "-").Trim('-');
-        var prefix = slug.Length == 0 ? "operation" : slug[..Math.Min(slug.Length, 230)].TrimEnd('-');
+        var slug = NonSlugCharacters().Replace(JsonNamingPolicy.KebabCaseLower.ConvertName(name), "-").Trim('-');
+        var prefix = slug.Length == 0 ? fallback : slug[..Math.Min(slug.Length, 230)].TrimEnd('-');
         var id = prefix;
         var suffix = 2;
-        while (!operationIds.Add(id))
+        while (!reservedKeys.Add(id))
         {
             id = string.Create(CultureInfo.InvariantCulture, $"{prefix}-{suffix}");
             suffix++;
@@ -121,6 +129,9 @@ internal sealed partial class SignalRDocumentSource(
 
     [GeneratedRegex("[^a-z0-9]+")]
     private static partial Regex NonSlugCharacters();
+
+    [GeneratedRegex(@"^/(?:api/)?v[0-9]+(?:\.[0-9]+)*/", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex VersionedRoutePrefix();
 
     private async Task<(bool Authorized, bool RequiresBearer)> ResolveAuthorizationAsync(Endpoint? endpoint)
     {
@@ -210,8 +221,8 @@ internal sealed partial class SignalRDocumentSource(
     {
         return parameters.Where(parameter => parameter.IsStream).Select(parameter =>
         {
-            var streamId = ReserveOperationId(operationIds, id + "-upload-" + parameter.Name);
-            return new AsyncApiOperation(streamId, context.Path, AsyncApiAction.Receive,
+            var streamId = ReserveKey(operationIds, id + "-upload-" + parameter.Name, "operation");
+            return new AsyncApiOperation(streamId, context.ChannelKey, AsyncApiAction.Receive,
                 new AsyncApiMessage(streamId, CreateReplySchema(parameter.Type, parameter.Schema, true))
                 {
                     Title = documentation.Name + " / " + parameter.Name + " stream"
@@ -253,7 +264,7 @@ internal sealed partial class SignalRDocumentSource(
             Title = documentation.Name + (method.IsClientMethod && method.ResultType is null ? " notification" : " request")
         };
         var replySuffix = method.IsStream ? " stream" : " response";
-        return new AsyncApiOperation(id, context.Path, method.IsClientMethod ? AsyncApiAction.Send : AsyncApiAction.Receive,
+        return new AsyncApiOperation(id, context.ChannelKey, method.IsClientMethod ? AsyncApiAction.Send : AsyncApiAction.Receive,
             message, context.WireProtocol, documentation.Summary)
         {
             Name = documentation.Name,
@@ -416,7 +427,7 @@ internal sealed partial class SignalRDocumentSource(
             .Select(transport => (JsonNode?)JsonValue.Create(transport.ToString()))]);
     }
 
-    private sealed record HubContext(string Path, bool Authorized, bool RequiresBearer, JsonArray Protocols,
+    private sealed record HubContext(string ChannelKey, bool Authorized, bool RequiresBearer, JsonArray Protocols,
         bool ImplicitServices, HttpTransportType Transports)
     {
         internal string WireProtocol => (Transports & HttpTransportType.WebSockets) != 0 ? "ws" : "http";
