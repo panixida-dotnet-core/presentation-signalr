@@ -31,7 +31,10 @@ public sealed class OperationMetadataTests
 
         var document = Generate(app);
 
-        document["info"]!["title"]!.GetValue<string>().ShouldBe("Metadata SignalR v1.0");
+        document["info"]!["title"]!.GetValue<string>().ShouldBe("Metadata SignalR v1");
+        document["info"]!["version"]!.GetValue<string>().ShouldBe("1.0");
+        document["channels"]!["/metadata"]!["title"]!.GetValue<string>().ShouldBe(MetadataHub.Summary);
+        document["operations"]!["wire-read"].ShouldNotBeNull();
         var read = Operation(document, "/metadata", "wire-read");
         read["title"]!.GetValue<string>().ShouldBe("ContractRead");
         read["summary"]!.GetValue<string>().ShouldBe("Attribute summary");
@@ -74,7 +77,7 @@ public sealed class OperationMetadataTests
         source.GetDocuments().Select(item => item.Name).Order().ShouldBe(["matchmaking-signalr-v2", "metadata-signalr-v1"]);
         document["channels"]!.AsObject().Select(channel => channel.Key).Order().ShouldBe(["/metadata", "/secondary"]);
         document["operations"]!.AsObject().Count.ShouldBe(11);
-        document["operations"]!.AsObject().Where(operation => operation.Key.EndsWith("@/metadata", StringComparison.Ordinal))
+        document["operations"]!.AsObject().Where(operation => HasChannel(operation.Value!, "/metadata"))
             .Select(operation => operation.Value!["bindings"]!["x-signalr"]!["target"]!.GetValue<string>()).Order()
             .ShouldBe(MetadataTargets.Order());
         foreach (var entry in document["operations"]!.AsObject())
@@ -93,7 +96,34 @@ public sealed class OperationMetadataTests
 
         var other = source.Generate("matchmaking-signalr-v2", TestContext.Current.CancellationToken);
         other["channels"]!.AsObject().Select(channel => channel.Key).ShouldBe(["/other"]);
-        document["operations"]!.AsObject().Any(operation => operation.Key.EndsWith("@/other", StringComparison.Ordinal)).ShouldBeFalse();
+        document["operations"]!.AsObject().Any(operation => HasChannel(operation.Value!, "/other")).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Operation IDs are unique and deterministic when two mapped hubs use the same target")]
+    public async Task RepeatedTargetsGetDistinctOperationIds()
+    {
+        await using var app = CreateApplication();
+        app.UseSignalR(hubs =>
+        {
+            hubs.MapHub<MetadataHub>("/second");
+            hubs.MapHub<MetadataHub>("/first");
+        });
+
+        var operations = Generate(app)["operations"]!;
+
+        HasChannel(operations["wire-read"]!, "/first").ShouldBeTrue();
+        HasChannel(operations["wire-read-2"]!, "/second").ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Targets without ASCII slug characters use a fallback operation ID and keep the wire name")]
+    public async Task NonAsciiTargetKeepsItsWireName()
+    {
+        await using var app = CreateApplication();
+        app.UseSignalR(hubs => hubs.MapHub<SecondaryMetadataHub>("/secondary"));
+
+        var document = Generate(app);
+
+        document["operations"]!["operation"].ShouldBeSameAs(Operation(document, "/secondary", "更新"));
     }
 
     [Fact(DisplayName = "Changing display names only changes operation and message titles while preserving the complete transport contract")]
@@ -276,9 +306,13 @@ public sealed class OperationMetadataTests
 
     private static JsonNode Operation(JsonObject document, string path, string target, bool client = false) =>
         document["operations"]!.AsObject().Single(operation =>
-            operation.Key.EndsWith("@" + path, StringComparison.Ordinal) &&
+            HasChannel(operation.Value!, path) &&
             operation.Value!["bindings"]!["x-signalr"]!["target"]!.GetValue<string>() == target &&
             operation.Value["action"]!.GetValue<string>() == (client ? "send" : "receive")).Value!;
+
+    private static bool HasChannel(JsonNode operation, string path) =>
+        operation["channel"]!["$ref"]!.GetValue<string>() == "#/channels/" +
+            path.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal);
 
     private static JsonNode Message(JsonObject document, JsonNode operation, bool reply = false)
     {
@@ -310,7 +344,7 @@ public sealed class MetadataHub : Hub<IMetadataClient>, IDocumentedHubEndpoint, 
 {
     public static string Name => "metadata";
 
-    public static string Summary => "Metadata";
+    public static string Summary => "Metadata SignalR";
 
     public static ApiVersion ApiVersion => new(1, 0);
 
@@ -353,12 +387,13 @@ public sealed class SecondaryMetadataHub : Hub, IDocumentedHubEndpoint
 {
     public static string Name => "metadata";
 
-    public static string Summary => "Metadata";
+    public static string Summary => MetadataHub.Summary;
 
     public static ApiVersion ApiVersion => new(1, 0);
 
     public static HubEndpointConventionBuilder Map(HubMapBuilder hubs) => hubs.MapHub<SecondaryMetadataHub>("/secondary");
 
+    [HubMethodName("更新")]
     public string GetState()
     {
         Context.ConnectionAborted.ThrowIfCancellationRequested();

@@ -1,5 +1,8 @@
+using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.BearerToken;
@@ -19,7 +22,7 @@ using PANiXiDA.Core.Presentation.SignalR.Hubs;
 
 namespace PANiXiDA.Core.Presentation.SignalR.Documentation;
 
-internal sealed class SignalRDocumentSource(
+internal sealed partial class SignalRDocumentSource(
     MappedHubDocumentation mappings, ApiSchemaRegistry schemas, IServiceProvider services,
     IOptions<SignalRDocumentationOptions> documentationOptions) : IAsyncApiDocumentSource
 {
@@ -58,11 +61,14 @@ internal sealed class SignalRDocumentSource(
         var descriptor = GetDocuments().SingleOrDefault(document => document.Name == documentName)
             ?? throw new ArgumentException($"SignalR document '{documentName}' was not found.", nameof(documentName));
         var operations = new List<AsyncApiOperation>();
+        var operationIds = new HashSet<string>(StringComparer.Ordinal);
+        var titles = new Dictionary<string, string>(StringComparer.Ordinal);
         var serviceTypes = services.GetService<IServiceProviderIsService>();
         var endpoints = services.GetService<IHostApplicationLifetime>()?.ApplicationStarted.IsCancellationRequested == true
             ? services.GetRequiredService<EndpointDataSource>().Endpoints
             : mappings.Endpoints?.Invoke() ?? services.GetRequiredService<EndpointDataSource>().Endpoints;
-        foreach (var hub in mappings.Hubs.Where(hub => hub.Description.Document.Name == documentName))
+        foreach (var hub in mappings.Hubs.Where(hub => hub.Description.Document.Name == documentName)
+            .OrderBy(hub => hub.Path, StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var options = hub.Description.Options(services);
@@ -74,18 +80,47 @@ internal sealed class SignalRDocumentSource(
             cancellationToken.ThrowIfCancellationRequested();
             var context = new HubContext(hub.Path, authorized, requiresBearer,
                 SupportedProtocols(options, hub.ConnectionOptions.Transports), !options.DisableImplicitFromServicesParameters, hub.ConnectionOptions.Transports);
+            if (hub.Description.Summary is { } summary)
+            {
+                titles.Add(hub.Path, summary);
+            }
             foreach (var method in hub.Description.Methods)
             {
                 var parameters = method.Parameters.Where(parameter => IsSerialized(parameter, method, context, serviceTypes)).ToArray();
-                var id = hub.HubType.FullName + "." + (method.IsClientMethod ? "client." : "hub.") + method.Name + "@" + hub.Path;
+                var id = ReserveOperationId(operationIds, method.Name);
                 var documentation = ResolveMetadata(hub.Description, method, overrides);
-                operations.AddRange(CreateUploads(id, context, method, parameters, documentation));
+                operations.AddRange(CreateUploads(operationIds, id, context, method, parameters, documentation));
                 operations.Add(CreateInvocation(id, context, method, parameters, documentation));
             }
         }
 
-        return AsyncApiDocumentBuilder.Build(descriptor, operations);
+        var document = AsyncApiDocumentBuilder.Build(descriptor, operations);
+        foreach (var (address, channel) in document["channels"]!.AsObject())
+        {
+            if (titles.TryGetValue(address, out var title))
+            {
+                channel!["title"] = title;
+            }
+        }
+        return document;
     }
+
+    private static string ReserveOperationId(HashSet<string> operationIds, string target)
+    {
+        var slug = NonSlugCharacters().Replace(JsonNamingPolicy.KebabCaseLower.ConvertName(target), "-").Trim('-');
+        var prefix = slug.Length == 0 ? "operation" : slug[..Math.Min(slug.Length, 230)].TrimEnd('-');
+        var id = prefix;
+        var suffix = 2;
+        while (!operationIds.Add(id))
+        {
+            id = string.Create(CultureInfo.InvariantCulture, $"{prefix}-{suffix}");
+            suffix++;
+        }
+        return id;
+    }
+
+    [GeneratedRegex("[^a-z0-9]+")]
+    private static partial Regex NonSlugCharacters();
 
     private async Task<(bool Authorized, bool RequiresBearer)> ResolveAuthorizationAsync(Endpoint? endpoint)
     {
@@ -170,12 +205,12 @@ internal sealed class SignalRDocumentSource(
         HubContext context, IServiceProviderIsService? serviceTypes) => method.IsClientMethod || parameter.IsStream ||
         !context.ImplicitServices || !parameter.AllowImplicitServices || serviceTypes?.IsService(GetServiceType(parameter.Type)) != true;
 
-    private IEnumerable<AsyncApiOperation> CreateUploads(string id, HubContext context, HubMethodDescription method,
+    private IEnumerable<AsyncApiOperation> CreateUploads(HashSet<string> operationIds, string id, HubContext context, HubMethodDescription method,
         HubParameterDescription[] parameters, ApiOperationMetadata documentation)
     {
         return parameters.Where(parameter => parameter.IsStream).Select(parameter =>
         {
-            var streamId = id + ".upload." + parameter.Name;
+            var streamId = ReserveOperationId(operationIds, id + "-upload-" + parameter.Name);
             return new AsyncApiOperation(streamId, context.Path, AsyncApiAction.Receive,
                 new AsyncApiMessage(streamId, CreateReplySchema(parameter.Type, parameter.Schema, true))
                 {

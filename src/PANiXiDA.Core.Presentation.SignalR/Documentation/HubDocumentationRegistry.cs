@@ -19,6 +19,7 @@ namespace PANiXiDA.Core.Presentation.SignalR.Documentation;
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static class HubDocumentationRegistry
 {
+    private const string Transport = "signalr";
     private static readonly ConditionalWeakTable<Type, HubDescription> Registrations = [];
 
     /// <summary>Registers a hub using its static documentation contract and generated method metadata.</summary>
@@ -27,8 +28,10 @@ public static class HubDocumentationRegistry
     public static void RegisterHub<THub>(params HubMethodDescription[] methods)
         where THub : Hub, IDocumentedHubEndpoint
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(THub.Name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(THub.Summary);
+        var module = THub.Name;
+        var summary = THub.Summary;
+        ArgumentException.ThrowIfNullOrWhiteSpace(module);
+        ArgumentException.ThrowIfNullOrWhiteSpace(summary);
         var version = THub.ApiVersion;
         ArgumentNullException.ThrowIfNull(version);
         if (version == ApiVersion.Neutral)
@@ -37,9 +40,11 @@ public static class HubDocumentationRegistry
         }
 
         var text = version.ToString();
-        var document = new ApiDocumentDescriptor(ApiDocumentNames.Create(THub.Name, "signalr", text),
-            $"{THub.Summary} SignalR v{text}", THub.Name, text, ApiDocumentFormat.AsyncApi, deprecated: THub.IsDeprecated);
-        RegisterCore<THub>(document, THub.Operations, methods);
+        var documentName = ApiDocumentNames.Create(module, Transport, text);
+        var prefix = $"{module}-{Transport}-";
+        var document = new ApiDocumentDescriptor(documentName, $"{summary} {documentName[prefix.Length..]}",
+            module, text, ApiDocumentFormat.AsyncApi, deprecated: THub.IsDeprecated);
+        RegisterCore<THub>(document, THub.Operations, methods, summary);
     }
 
     /// <summary>Registers a documented hub. Intended for generated module initializers.</summary>
@@ -53,7 +58,7 @@ public static class HubDocumentationRegistry
     }
 
     private static void RegisterCore<THub>(ApiDocumentDescriptor document,
-        IReadOnlyDictionary<string, ApiOperationMetadata> operations, HubMethodDescription[] methods)
+        IReadOnlyDictionary<string, ApiOperationMetadata> operations, HubMethodDescription[] methods, string? summary = null)
         where THub : Hub
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -73,14 +78,20 @@ public static class HubDocumentationRegistry
 
         Registrations.Add(typeof(THub), new HubDescription(document, Array.AsReadOnly(methods.ToArray()),
             services => services.GetRequiredService<IOptions<HubOptions<THub>>>().Value,
-            operations.ToFrozenDictionary(StringComparer.Ordinal)));
+            operations.ToFrozenDictionary(StringComparer.Ordinal))
+        {
+            Summary = summary
+        });
     }
 
     internal static HubDescription? Find(Type hubType) => Registrations.TryGetValue(hubType, out var value) ? value : null;
 }
 
 internal sealed record HubDescription(ApiDocumentDescriptor Document, IReadOnlyList<HubMethodDescription> Methods,
-    Func<IServiceProvider, HubOptions> Options, IReadOnlyDictionary<string, ApiOperationMetadata> Operations);
+    Func<IServiceProvider, HubOptions> Options, IReadOnlyDictionary<string, ApiOperationMetadata> Operations)
+{
+    internal string? Summary { get; init; }
+}
 
 internal sealed class MappedHubDocumentation
 {
